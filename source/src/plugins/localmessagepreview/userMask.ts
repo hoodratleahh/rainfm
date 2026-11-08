@@ -49,8 +49,10 @@ function swapAuthor(author: any): any {
     const targetId = masks.get(String(author.id));
     if (!targetId) return author;
     const target = (UserStore as any).getUser?.(targetId);
-    if (!target) return { ...author, id: targetId, username: "Unknown", global_name: null, avatar: null };
-    return { ...author, id: target.id, username: target.username, global_name: target.global_name ?? null, avatar: target.avatar ?? null };
+    // Keep the original avatar and id so the photo in messages matches the DM header.
+    // Only swap the display name so the author card shows the target's name.
+    if (!target) return { ...author, username: "Unknown", global_name: null };
+    return { ...author, username: target.username, global_name: target.global_name ?? null };
 }
 
 function swapMessages(messages: any[]): void {

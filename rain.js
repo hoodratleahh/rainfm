@@ -15661,17 +15661,13 @@ ${pendingInsertLink}` : pendingInsertLink;
     var target = UserStore.getUser?.(targetId);
     if (!target) return {
       ...author,
-      id: targetId,
       username: "Unknown",
-      global_name: null,
-      avatar: null
+      global_name: null
     };
     return {
       ...author,
-      id: target.id,
       username: target.username,
-      global_name: target.global_name ?? null,
-      avatar: target.avatar ?? null
+      global_name: target.global_name ?? null
     };
   }
   function swapMessages(messages) {
