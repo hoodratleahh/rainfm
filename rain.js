@@ -15634,19 +15634,17 @@ ${pendingInsertLink}` : pendingInsertLink;
       var msgs = collection._array ?? collection.toArray?.() ?? [];
       for (var msg of msgs) {
         if (msg?.author && masks.has(String(msg.author.id))) {
-          msg.author = swapAuthor(msg.author);
+          FluxDispatcher.dispatch({
+            type: "MESSAGE_UPDATE",
+            message: {
+              ...msg,
+              author: swapAuthor(msg.author),
+              channel_id: channelId
+            },
+            optimistic: false
+          });
         }
       }
-      FluxDispatcher.dispatch({
-        type: "LOAD_MESSAGES_SUCCESS",
-        channelId,
-        messages: msgs,
-        isBefore: false,
-        isAfter: false,
-        hasMoreBefore: false,
-        hasMoreAfter: false,
-        limit: msgs.length
-      });
     } catch (_2) {
     }
   }
