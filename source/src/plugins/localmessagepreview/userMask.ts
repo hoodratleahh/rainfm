@@ -19,16 +19,26 @@ function refreshCurrentChannel() {
         const collection = MessageStore.getMessages(channelId);
         if (!collection) return;
         const msgs: any[] = collection._array ?? collection.toArray?.() ?? [];
-        for (const msg of msgs) {
+        // Sort oldest-first so LOAD_MESSAGES_SUCCESS renders in the correct order
+        const sorted = [...msgs].sort((a: any, b: any) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+        for (const msg of sorted) {
             if (msg?.author && masks.has(String(msg.author.id))) {
-                // Use MESSAGE_UPDATE per message so Discord doesn't reorder the list
-                (FluxDispatcher as any).dispatch({
-                    type: "MESSAGE_UPDATE",
-                    message: { ...msg, author: swapAuthor(msg.author), channel_id: channelId },
-                    optimistic: false,
-                });
+                msg.author = swapAuthor(msg.author);
             }
         }
+        // LOAD_MESSAGES_SUCCESS forces Discord to re-render avatars (MESSAGE_UPDATE does not)
+        (FluxDispatcher as any).dispatch({
+            type: "LOAD_MESSAGES_SUCCESS",
+            channelId,
+            messages: sorted,
+            isBefore: false,
+            isAfter: false,
+            hasMoreBefore: false,
+            hasMoreAfter: false,
+            limit: sorted.length,
+        });
     } catch (_) {}
 }
 

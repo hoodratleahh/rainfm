@@ -15632,19 +15632,24 @@ ${pendingInsertLink}` : pendingInsertLink;
       var collection = MessageStore2.getMessages(channelId);
       if (!collection) return;
       var msgs = collection._array ?? collection.toArray?.() ?? [];
-      for (var msg of msgs) {
+      var sorted = [
+        ...msgs
+      ].sort((a, b3) => new Date(a.timestamp).getTime() - new Date(b3.timestamp).getTime());
+      for (var msg of sorted) {
         if (msg?.author && masks.has(String(msg.author.id))) {
-          FluxDispatcher.dispatch({
-            type: "MESSAGE_UPDATE",
-            message: {
-              ...msg,
-              author: swapAuthor(msg.author),
-              channel_id: channelId
-            },
-            optimistic: false
-          });
+          msg.author = swapAuthor(msg.author);
         }
       }
+      FluxDispatcher.dispatch({
+        type: "LOAD_MESSAGES_SUCCESS",
+        channelId,
+        messages: sorted,
+        isBefore: false,
+        isAfter: false,
+        hasMoreBefore: false,
+        hasMoreAfter: false,
+        limit: sorted.length
+      });
     } catch (_2) {
     }
   }
