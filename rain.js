@@ -15627,28 +15627,13 @@ ${pendingInsertLink}` : pendingInsertLink;
     try {
       var channelId = SelectedChannelStore.getChannelId?.();
       if (!channelId) return;
-      var MessageStore2 = findByProps("getMessages", "getMessage");
-      if (!MessageStore2) return;
-      var collection = MessageStore2.getMessages(channelId);
-      if (!collection) return;
-      var msgs = collection._array ?? collection.toArray?.() ?? [];
-      var sorted = [
-        ...msgs
-      ].sort((a, b3) => new Date(a.timestamp).getTime() - new Date(b3.timestamp).getTime());
-      for (var msg of sorted) {
-        if (msg?.author && masks.has(String(msg.author.id))) {
-          msg.author = swapAuthor(msg.author);
-        }
-      }
+      var ChannelStore2 = findByProps("getChannel", "getDMFromUserId");
+      var channel = ChannelStore2?.getChannel?.(channelId);
+      var guildId = channel?.guild_id ?? null;
       FluxDispatcher.dispatch({
-        type: "LOAD_MESSAGES_SUCCESS",
+        type: "CHANNEL_SELECT",
         channelId,
-        messages: sorted,
-        isBefore: false,
-        isAfter: false,
-        hasMoreBefore: false,
-        hasMoreAfter: false,
-        limit: sorted.length
+        guildId
       });
     } catch (_2) {
     }

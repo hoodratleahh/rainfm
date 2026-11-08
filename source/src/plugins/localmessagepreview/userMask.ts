@@ -14,31 +14,11 @@ function refreshCurrentChannel() {
     try {
         const channelId = (SelectedChannelStore as any).getChannelId?.();
         if (!channelId) return;
-        const MessageStore = findByProps("getMessages", "getMessage");
-        if (!MessageStore) return;
-        const collection = MessageStore.getMessages(channelId);
-        if (!collection) return;
-        const msgs: any[] = collection._array ?? collection.toArray?.() ?? [];
-        // Sort oldest-first so LOAD_MESSAGES_SUCCESS renders in the correct order
-        const sorted = [...msgs].sort((a: any, b: any) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-        for (const msg of sorted) {
-            if (msg?.author && masks.has(String(msg.author.id))) {
-                msg.author = swapAuthor(msg.author);
-            }
-        }
-        // LOAD_MESSAGES_SUCCESS forces Discord to re-render avatars (MESSAGE_UPDATE does not)
-        (FluxDispatcher as any).dispatch({
-            type: "LOAD_MESSAGES_SUCCESS",
-            channelId,
-            messages: sorted,
-            isBefore: false,
-            isAfter: false,
-            hasMoreBefore: false,
-            hasMoreAfter: false,
-            limit: sorted.length,
-        });
+        const ChannelStore = findByProps("getChannel", "getDMFromUserId");
+        const channel = (ChannelStore as any)?.getChannel?.(channelId);
+        const guildId = channel?.guild_id ?? null;
+        // CHANNEL_SELECT forces a full re-render: correct order, correct avatars, scroll at bottom
+        (FluxDispatcher as any).dispatch({ type: "CHANNEL_SELECT", channelId, guildId });
     } catch (_) {}
 }
 
