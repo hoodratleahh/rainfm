@@ -7,52 +7,38 @@ const masks = new Map<string, string>(); // sourceId → targetId
 
 export function applyMask(sourceId: string, targetId: string) {
     masks.set(sourceId, targetId);
-    // Ensure the target's profile is in cache before we try to read their avatar hash.
-    // The profile card fetch already happens when the user opens a profile, but if the
-    // swap is applied before that, the cache may be empty and avatar would render as default.
-    try {
-        const profileActions = findByProps("fetchProfile");
-        (profileActions as any)?.fetchProfile?.(targetId);
-    } catch (_) {}
-    // 400 ms window for the fetch to populate the cache, then refresh
-    setTimeout(() => refreshCurrentChannel(), 400);
+    refreshCurrentChannel();
 }
 
 function refreshCurrentChannel() {
     try {
         const channelId = (SelectedChannelStore as any).getChannelId?.();
         if (!channelId) return;
-
-        // 1. Spoof USER_UPDATE for each masked source ID with the target's profile data.
-        //    Discord message-item components subscribe to UserStore by author ID; this
-        //    fires those subscriptions so they re-render and pick up the target's avatar
-        //    via the getUser redirect that is already in place.
-        for (const [sourceId, targetId] of masks) {
-            const target = (UserStore as any).getUser?.(targetId);
-            if (target) {
-                (FluxDispatcher as any).dispatch({
-                    type: "USER_UPDATE",
-                    user: { ...target, id: sourceId },
-                });
-            }
-        }
-
-        // 2. Per-message MESSAGE_UPDATE with the author already swapped, covering
-        //    any component that reads message.author directly instead of calling getUser.
         const MessageStore = findByProps("getMessages", "getMessage");
         if (!MessageStore) return;
-        const collection = (MessageStore as any).getMessages(channelId);
+        const collection = MessageStore.getMessages(channelId);
         if (!collection) return;
-        const msgs: any[] = collection._array ?? collection.toArray?.() ?? [];
+        // MessageStore uses an OrderedMap-like structure; _array holds the messages.
+        // The array is newest-first, so reverse it before passing to LOAD_MESSAGES_SUCCESS
+        // so Discord renders oldest at top, newest at bottom (correct order).
+        const rawMsgs: any[] = collection._array ?? collection.toArray?.() ?? [];
+        const msgs = rawMsgs.slice().reverse();
         for (const msg of msgs) {
             if (msg?.author && masks.has(String(msg.author.id))) {
-                (FluxDispatcher as any).dispatch({
-                    type: "MESSAGE_UPDATE",
-                    message: { ...msg, author: swapAuthor(msg.author), channel_id: channelId },
-                    optimistic: false,
-                });
+                msg.author = swapAuthor(msg.author);
             }
         }
+        // hasMoreBefore: true keeps the scroll anchored at the bottom (most recent messages)
+        (FluxDispatcher as any).dispatch({
+            type: "LOAD_MESSAGES_SUCCESS",
+            channelId,
+            messages: msgs,
+            isBefore: false,
+            isAfter: false,
+            hasMoreBefore: true,
+            hasMoreAfter: false,
+            limit: msgs.length,
+        });
     } catch (_) {}
 }
 
@@ -101,12 +87,6 @@ export function patchUserStoreMask(): () => void {
         } else if (e.type === "MESSAGE_CREATE") {
             if (e.message?.author && masks.has(String(e.message.author.id))) {
                 e.message.author = swapAuthor(e.message.author);
-            }
-        } else if (e.type === "USER_PROFILE_FETCH_SUCCESS") {
-            // Target profile just arrived in cache; re-run the refresh so avatar is now available
-            const uid = String(e.user?.id ?? e.userId ?? "");
-            if (uid && [...masks.values()].includes(uid)) {
-                refreshCurrentChannel();
             }
         }
     };

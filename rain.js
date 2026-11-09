@@ -15621,47 +15621,33 @@ ${pendingInsertLink}` : pendingInsertLink;
   // src/plugins/localmessagepreview/userMask.ts
   function applyMask(sourceId, targetId) {
     masks.set(sourceId, targetId);
-    try {
-      var profileActions = findByProps("fetchProfile");
-      profileActions?.fetchProfile?.(targetId);
-    } catch (_2) {
-    }
-    setTimeout(() => refreshCurrentChannel(), 400);
+    refreshCurrentChannel();
   }
   function refreshCurrentChannel() {
     try {
       var channelId = SelectedChannelStore.getChannelId?.();
       if (!channelId) return;
-      for (var [sourceId, targetId] of masks) {
-        var target = UserStore.getUser?.(targetId);
-        if (target) {
-          FluxDispatcher.dispatch({
-            type: "USER_UPDATE",
-            user: {
-              ...target,
-              id: sourceId
-            }
-          });
-        }
-      }
       var MessageStore2 = findByProps("getMessages", "getMessage");
       if (!MessageStore2) return;
       var collection = MessageStore2.getMessages(channelId);
       if (!collection) return;
-      var msgs = collection._array ?? collection.toArray?.() ?? [];
+      var rawMsgs = collection._array ?? collection.toArray?.() ?? [];
+      var msgs = rawMsgs.slice().reverse();
       for (var msg of msgs) {
         if (msg?.author && masks.has(String(msg.author.id))) {
-          FluxDispatcher.dispatch({
-            type: "MESSAGE_UPDATE",
-            message: {
-              ...msg,
-              author: swapAuthor(msg.author),
-              channel_id: channelId
-            },
-            optimistic: false
-          });
+          msg.author = swapAuthor(msg.author);
         }
       }
+      FluxDispatcher.dispatch({
+        type: "LOAD_MESSAGES_SUCCESS",
+        channelId,
+        messages: msgs,
+        isBefore: false,
+        isAfter: false,
+        hasMoreBefore: true,
+        hasMoreAfter: false,
+        limit: msgs.length
+      });
     } catch (_2) {
     }
   }
@@ -15712,13 +15698,6 @@ ${pendingInsertLink}` : pendingInsertLink;
       } else if (e.type === "MESSAGE_CREATE") {
         if (e.message?.author && masks.has(String(e.message.author.id))) {
           e.message.author = swapAuthor(e.message.author);
-        }
-      } else if (e.type === "USER_PROFILE_FETCH_SUCCESS") {
-        var uid = String(e.user?.id ?? e.userId ?? "");
-        if (uid && [
-          ...masks.values()
-        ].includes(uid)) {
-          refreshCurrentChannel();
         }
       }
     };
