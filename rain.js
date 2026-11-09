@@ -15745,21 +15745,6 @@ ${pendingInsertLink}` : pendingInsertLink;
   });
 
   // src/plugins/localmessagepreview/quickMessage.tsx
-  function setPendingUser(id) {
-    pendingUserId = id;
-    if (pendingTimer !== null) clearTimeout(pendingTimer);
-    pendingTimer = setTimeout(() => {
-      pendingUserId = void 0;
-      pendingTimer = null;
-    }, 5e3);
-  }
-  function consumePending() {
-    pendingUserId = void 0;
-    if (pendingTimer !== null) {
-      clearTimeout(pendingTimer);
-      pendingTimer = null;
-    }
-  }
   function QuickMessageAlert({ sourceUserId }) {
     var [targetId, setTargetId] = React17.useState("");
     var [error, setError] = React17.useState("");
@@ -15830,39 +15815,31 @@ ${pendingInsertLink}` : pendingInsertLink;
       sourceUserId
     }));
   }
-  function getLabel(item) {
-    if (typeof item?.label === "string") return item.label;
-    if (typeof item?.text === "string") return item.text;
-    if (typeof item?.props?.label === "string") return item.props.label;
-    if (typeof item?.props?.text === "string") return item.props.text;
-    return "";
+  function setPendingUser(id) {
+    pendingUserId = id;
+    if (pendingTimer !== null) clearTimeout(pendingTimer);
+    pendingTimer = setTimeout(() => {
+      pendingUserId = void 0;
+      pendingTimer = null;
+    }, 1e4);
   }
-  function collectItems(raw) {
-    if (!Array.isArray(raw)) return [];
-    if (raw.length > 0 && Array.isArray(raw[0])) return raw.flatMap((g2) => g2);
-    return raw;
-  }
-  function hookItem(item, handler) {
-    item.__lmpWrapped = true;
-    var hasPress = typeof item.onPress === "function";
-    var hasAction = typeof item.action === "function";
-    if (hasPress) item.onPress = handler;
-    if (hasAction) item.action = handler;
-    if (!hasPress && !hasAction) {
-      item.onPress = handler;
-      item.action = handler;
+  function consumePending() {
+    pendingUserId = void 0;
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
     }
   }
-  function uidFromSheetProps(args) {
+  function uidFromSheetArgs(args) {
     for (var i = 2; i < args.length; i++) {
       var p = args[i];
       if (!p || typeof p !== "object") continue;
-      var uid = p?.user?.id ?? p?.userId ?? p?.targetUserId ?? p?.sourceUserId ?? void 0;
-      if (uid && typeof uid === "string") return uid;
-      var inner = p?.params ?? p?.initialProps ?? p?.props;
+      var v2 = p.userId ?? p.user?.id ?? p.targetUserId;
+      if (v2 && typeof v2 === "string") return v2;
+      var inner = p.params ?? p.initialProps ?? p.props;
       if (inner && typeof inner === "object") {
-        var uid2 = inner?.user?.id ?? inner?.userId ?? void 0;
-        if (uid2 && typeof uid2 === "string") return uid2;
+        var v22 = inner.userId ?? inner.user?.id;
+        if (v22 && typeof v22 === "string") return v22;
       }
     }
     return void 0;
@@ -15875,102 +15852,147 @@ ${pendingInsertLink}` : pendingInsertLink;
     if (!node) return void 0;
     return node.props.userId ?? node.props?.user?.id ?? node.props?.targetUserId ?? void 0;
   }
+  function subtreeHasText(node, pattern, depth = 0) {
+    if (!node || depth > 8) return false;
+    if (typeof node === "string") return pattern.test(node);
+    if (!node.props) return false;
+    var ch = node.props.children;
+    if (typeof ch === "string") return pattern.test(ch);
+    if (Array.isArray(ch)) return ch.some((c2) => subtreeHasText(c2, pattern, depth + 1));
+    if (ch && typeof ch === "object") return subtreeHasText(ch, pattern, depth + 1);
+    return false;
+  }
   function tryHookSheet(tree, hintUid) {
+    var _loop2 = function(pattern2) {
+      var el = findInReactTree(tree, (n) => {
+        if (!n?.props) return false;
+        var lbl = n.props.label ?? n.props.text;
+        return typeof lbl === "string" && pattern2.test(lbl);
+      });
+      if (el?.props) {
+        el.props.onPress = handler;
+        if (el.props.action !== void 0) el.props.action = handler;
+        return {
+          v: uid
+        };
+      }
+    }, _loop1 = function(pattern12) {
+      var pressable = findInReactTree(tree, (n) => {
+        if (!n?.props) return false;
+        if (typeof n.props.onPress !== "function") return false;
+        return subtreeHasText(n, pattern12);
+      });
+      if (pressable?.props) {
+        pressable.props.onPress = handler;
+        return {
+          v: uid
+        };
+      }
+    };
     var uid = hintUid ?? uidFromTree(tree);
     if (!uid) return void 0;
     var handler = () => {
       setTimeout(() => openQuickMessageBox(uid), 300);
     };
-    var nodeA = findInReactTree(tree, (n) => Array.isArray(n?.props?.items) && n.props.items.length > 0);
-    if (nodeA) {
-      var items = collectItems(nodeA.props.items);
+    var nodeWithItems = findInReactTree(tree, (n) => Array.isArray(n?.props?.items) && n.props.items.length > 0);
+    if (nodeWithItems) {
+      var raw = nodeWithItems.props.items;
+      var items = raw.length > 0 && Array.isArray(raw[0]) ? raw.flat() : raw;
+      var getLabel = (item2) => item2?.label ?? item2?.text ?? item2?.props?.label ?? item2?.props?.text ?? "";
+      var hookFn = (item2) => {
+        item2.__lmpWrapped = true;
+        if (typeof item2.onPress === "function") item2.onPress = handler;
+        else if (typeof item2.action === "function") item2.action = handler;
+        else {
+          item2.onPress = handler;
+          item2.action = handler;
+        }
+      };
       for (var item of items) {
         if (!item || item.__lmpWrapped) continue;
         if (COPY_AVATAR_LINK.test(getLabel(item))) {
-          hookItem(item, handler);
+          hookFn(item);
           return uid;
         }
       }
       for (var item1 of items) {
         if (!item1 || item1.__lmpWrapped) continue;
         if (COPY_USERNAME.test(getLabel(item1))) {
-          hookItem(item1, handler);
+          hookFn(item1);
           return uid;
         }
       }
     }
-    var avatarEl = findInReactTree(tree, (n) => n?.props && (typeof n.props.label === "string" && COPY_AVATAR_LINK.test(n.props.label) || typeof n.props.text === "string" && COPY_AVATAR_LINK.test(n.props.text)));
-    if (avatarEl?.props) {
-      avatarEl.props.onPress = handler;
-      if (avatarEl.props.action !== void 0) avatarEl.props.action = handler;
-      return uid;
+    for (var pattern of [
+      COPY_AVATAR_LINK,
+      COPY_USERNAME
+    ]) {
+      var _ret = _loop2(pattern);
+      if (_type_of(_ret) === "object") return _ret.v;
     }
-    var usernameEl = findInReactTree(tree, (n) => n?.props && (typeof n.props.label === "string" && COPY_USERNAME.test(n.props.label) || typeof n.props.text === "string" && COPY_USERNAME.test(n.props.text)));
-    if (usernameEl?.props) {
-      usernameEl.props.onPress = handler;
-      if (usernameEl.props.action !== void 0) usernameEl.props.action = handler;
-      return uid;
+    for (var pattern1 of [
+      COPY_AVATAR_LINK,
+      COPY_USERNAME
+    ]) {
+      var _ret1 = _loop1(pattern1);
+      if (_type_of(_ret1) === "object") return _ret1.v;
     }
     return void 0;
   }
   function patchQuickMessage() {
-    var _loop2 = function(name2) {
-      var patchExports = (exports) => {
-        if (!exports) return;
-        unpatches8.push(after("default", exports, (args, _ret) => {
-          var props = args?.[0]?.props ?? args?.[0];
-          var uid = props?.user?.id ?? props?.userId ?? void 0;
-          if (uid) setPendingUser(String(uid));
-        }));
-      };
-      var mod = findByName(name2, false);
-      if (mod) {
-        patchExports(mod);
-      } else {
-        unpatches8.push(waitFor((exports) => exports?.name === name2 || exports?.default?.name === name2 ? exports : void 0, patchExports));
-      }
-    };
     var unpatches8 = [];
+    var ClipboardMod = findByProps("setString", "getString");
+    if (ClipboardMod?.setString) {
+      unpatches8.push(before("setString", ClipboardMod, (args) => {
+        var str = args[0];
+        if (typeof str !== "string") return;
+        var match = str.match(CDN_AVATAR_RE);
+        if (!match) return;
+        var uid = match[1];
+        setPendingUser(uid);
+        setTimeout(() => openQuickMessageBox(uid), 80);
+      }));
+    }
     var LazyActionSheet8 = findByProps("openLazy", "hideActionSheet");
-    if (LazyActionSheet8) {
+    if (LazyActionSheet8?.openLazy) {
       unpatches8.push(before("openLazy", LazyActionSheet8, (args) => {
         var origGetter = args[0];
         if (typeof origGetter !== "function") return;
-        var directUid = uidFromSheetProps(args);
+        var directUid = uidFromSheetArgs(args);
         var snapPending = pendingUserId;
         args[0] = () => {
           var result = origGetter();
-          if (result && typeof result.then === "function") {
-            return result.then((m2) => {
-              if (!m2?.default) return m2;
-              var unpatch6 = after("default", m2, (_a, ret) => {
-                unpatch6();
-                var hintUid = directUid ?? snapPending;
-                var used = tryHookSheet(ret, hintUid);
-                if (used && !directUid && snapPending) consumePending();
-              });
-              return m2;
+          if (!result || typeof result.then !== "function") return result;
+          return result.then((m2) => {
+            var target = m2?.default ?? (typeof m2 === "function" ? m2 : null);
+            if (!target) return m2;
+            var obj = m2?.default ? m2 : {
+              default: m2
+            };
+            var key = m2?.default ? "default" : "default";
+            var unpatch6 = after(key, obj, (cArgs, ret) => {
+              unpatch6();
+              var compProps = cArgs?.[0] ?? {};
+              var uid = compProps.userId ?? compProps.user?.id ?? compProps.targetUserId ?? directUid ?? snapPending;
+              var used = tryHookSheet(ret, uid);
+              if (used && !directUid && snapPending) consumePending();
             });
-          }
-          return result;
+            return m2;
+          });
         };
       }));
     }
-    var MENU_NAMES = [
-      "UserProfileOverflowMenu",
-      "BotUserProfileOverflowMenu"
-    ];
-    for (var name of MENU_NAMES) _loop2(name);
     return () => {
       for (var fn of unpatches8) fn();
     };
   }
-  var React17, COPY_AVATAR_LINK, COPY_USERNAME, ALERT_KEY, pendingUserId, pendingTimer;
+  var React17, COPY_AVATAR_LINK, COPY_USERNAME, CDN_AVATAR_RE, ALERT_KEY, pendingUserId, pendingTimer;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
       init_asyncIteratorSymbol();
       init_promiseAllSettled();
+      init_type_of();
       init_jsxRuntime();
       React17 = __toESM(require_react());
       init_patcher();
@@ -15978,11 +16000,11 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_toasts();
       init_utils();
       init_metro();
-      init_modules2();
       init_components();
       init_userMask();
       COPY_AVATAR_LINK = /copy\s*avatar\s*(image\s*)?link/i;
       COPY_USERNAME = /copy\s*user\s*name/i;
+      CDN_AVATAR_RE = /cdn\.discordapp\.com\/avatars\/(\d{10,20})\//;
       ALERT_KEY = "LocalMessagePreviewQuick";
       pendingTimer = null;
     }
