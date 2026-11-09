@@ -15815,198 +15815,73 @@ ${pendingInsertLink}` : pendingInsertLink;
       sourceUserId
     }));
   }
-  function setPendingUser(id) {
-    pendingUserId = id;
-    if (pendingTimer !== null) clearTimeout(pendingTimer);
-    pendingTimer = setTimeout(() => {
-      pendingUserId = void 0;
-      pendingTimer = null;
-    }, 1e4);
+  function extractUserId(props) {
+    if (!props) return void 0;
+    return props.userId ?? props.user?.id ?? props.author?.id ?? props.message?.author?.id ?? props.targetUserId ?? void 0;
   }
-  function consumePending() {
-    pendingUserId = void 0;
-    if (pendingTimer !== null) {
-      clearTimeout(pendingTimer);
-      pendingTimer = null;
-    }
+  function addLongPress(ret, userId) {
+    if (!ret?.props) return;
+    ret.props.onLongPress = () => setTimeout(() => openQuickMessageBox(userId), 50);
+    ret.props.delayLongPress = LONG_PRESS_DELAY;
   }
-  function uidFromSheetArgs(args) {
-    for (var i = 2; i < args.length; i++) {
-      var p = args[i];
-      if (!p || typeof p !== "object") continue;
-      var v2 = p.userId ?? p.user?.id ?? p.targetUserId;
-      if (v2 && typeof v2 === "string") return v2;
-      var inner = p.params ?? p.initialProps ?? p.props;
-      if (inner && typeof inner === "object") {
-        var v22 = inner.userId ?? inner.user?.id;
-        if (v22 && typeof v22 === "string") return v22;
-      }
-    }
-    return void 0;
-  }
-  function uidFromTree(tree) {
-    var node = findInReactTree(tree, (n) => {
-      if (!n?.props) return false;
-      return !!(n.props.userId || n.props?.user?.id || n.props?.targetUserId);
-    });
-    if (!node) return void 0;
-    return node.props.userId ?? node.props?.user?.id ?? node.props?.targetUserId ?? void 0;
-  }
-  function subtreeHasText(node, pattern, depth = 0) {
-    if (!node || depth > 8) return false;
-    if (typeof node === "string") return pattern.test(node);
-    if (!node.props) return false;
-    var ch = node.props.children;
-    if (typeof ch === "string") return pattern.test(ch);
-    if (Array.isArray(ch)) return ch.some((c2) => subtreeHasText(c2, pattern, depth + 1));
-    if (ch && typeof ch === "object") return subtreeHasText(ch, pattern, depth + 1);
-    return false;
-  }
-  function tryHookSheet(tree, hintUid) {
-    var _loop2 = function(pattern2) {
-      var el = findInReactTree(tree, (n) => {
-        if (!n?.props) return false;
-        var lbl = n.props.label ?? n.props.text;
-        return typeof lbl === "string" && pattern2.test(lbl);
-      });
-      if (el?.props) {
-        el.props.onPress = handler;
-        if (el.props.action !== void 0) el.props.action = handler;
-        return {
-          v: uid
-        };
-      }
-    }, _loop1 = function(pattern12) {
-      var pressable = findInReactTree(tree, (n) => {
-        if (!n?.props) return false;
-        if (typeof n.props.onPress !== "function") return false;
-        return subtreeHasText(n, pattern12);
-      });
-      if (pressable?.props) {
-        pressable.props.onPress = handler;
-        return {
-          v: uid
-        };
-      }
-    };
-    var uid = hintUid ?? uidFromTree(tree);
-    if (!uid) return void 0;
-    var handler = () => {
-      setTimeout(() => openQuickMessageBox(uid), 300);
-    };
-    var nodeWithItems = findInReactTree(tree, (n) => Array.isArray(n?.props?.items) && n.props.items.length > 0);
-    if (nodeWithItems) {
-      var raw = nodeWithItems.props.items;
-      var items = raw.length > 0 && Array.isArray(raw[0]) ? raw.flat() : raw;
-      var getLabel = (item2) => item2?.label ?? item2?.text ?? item2?.props?.label ?? item2?.props?.text ?? "";
-      var hookFn = (item2) => {
-        item2.__lmpWrapped = true;
-        if (typeof item2.onPress === "function") item2.onPress = handler;
-        else if (typeof item2.action === "function") item2.action = handler;
-        else {
-          item2.onPress = handler;
-          item2.action = handler;
-        }
-      };
-      for (var item of items) {
-        if (!item || item.__lmpWrapped) continue;
-        if (COPY_AVATAR_LINK.test(getLabel(item))) {
-          hookFn(item);
-          return uid;
-        }
-      }
-      for (var item1 of items) {
-        if (!item1 || item1.__lmpWrapped) continue;
-        if (COPY_USERNAME.test(getLabel(item1))) {
-          hookFn(item1);
-          return uid;
-        }
-      }
-    }
-    for (var pattern of [
-      COPY_AVATAR_LINK,
-      COPY_USERNAME
-    ]) {
-      var _ret = _loop2(pattern);
-      if (_type_of(_ret) === "object") return _ret.v;
-    }
-    for (var pattern1 of [
-      COPY_AVATAR_LINK,
-      COPY_USERNAME
-    ]) {
-      var _ret1 = _loop1(pattern1);
-      if (_type_of(_ret1) === "object") return _ret1.v;
-    }
-    return void 0;
+  function patchAvatarExports(exports, unpatches8) {
+    if (!exports) return;
+    unpatches8.push(after("default", exports, ([props], ret) => {
+      var userId = extractUserId(props);
+      if (!userId) return;
+      addLongPress(ret, userId);
+    }));
   }
   function patchQuickMessage() {
+    var _loop2 = function(name2) {
+      var mod = findByName(name2, false);
+      if (mod) {
+        patchAvatarExports(mod, unpatches8);
+      } else {
+        unpatches8.push(waitFor((exports) => exports?.name === name2 || exports?.default?.name === name2 ? exports : void 0, (exports) => patchAvatarExports(exports, unpatches8)));
+      }
+    };
     var unpatches8 = [];
-    var ClipboardMod = findByProps("setString", "getString");
-    if (ClipboardMod?.setString) {
-      unpatches8.push(before("setString", ClipboardMod, (args) => {
-        var str = args[0];
-        if (typeof str !== "string") return;
-        var match = str.match(CDN_AVATAR_RE);
-        if (!match) return;
-        var uid = match[1];
-        setPendingUser(uid);
-        setTimeout(() => openQuickMessageBox(uid), 80);
-      }));
-    }
-    var LazyActionSheet8 = findByProps("openLazy", "hideActionSheet");
-    if (LazyActionSheet8?.openLazy) {
-      unpatches8.push(before("openLazy", LazyActionSheet8, (args) => {
-        var origGetter = args[0];
-        if (typeof origGetter !== "function") return;
-        var directUid = uidFromSheetArgs(args);
-        var snapPending = pendingUserId;
-        args[0] = () => {
-          var result = origGetter();
-          if (!result || typeof result.then !== "function") return result;
-          return result.then((m2) => {
-            var target = m2?.default ?? (typeof m2 === "function" ? m2 : null);
-            if (!target) return m2;
-            var obj = m2?.default ? m2 : {
-              default: m2
-            };
-            var key = m2?.default ? "default" : "default";
-            var unpatch6 = after(key, obj, (cArgs, ret) => {
-              unpatch6();
-              var compProps = cArgs?.[0] ?? {};
-              var uid = compProps.userId ?? compProps.user?.id ?? compProps.targetUserId ?? directUid ?? snapPending;
-              var used = tryHookSheet(ret, uid);
-              if (used && !directUid && snapPending) consumePending();
-            });
-            return m2;
-          });
-        };
+    var CANDIDATE_NAMES = [
+      "Avatar",
+      "UserAvatar",
+      "MessageAvatar",
+      "AvatarWithText",
+      "ChatAvatar",
+      "UserAvatarWithStatus",
+      "GuildMemberAvatar",
+      "ThreadMemberAvatar"
+    ];
+    for (var name of CANDIDATE_NAMES) _loop2(name);
+    var avatarByProps = findByProps("Avatar");
+    if (avatarByProps?.Avatar && typeof avatarByProps.Avatar === "function") {
+      unpatches8.push(after("Avatar", avatarByProps, ([props], ret) => {
+        var userId = extractUserId(props);
+        if (!userId) return;
+        addLongPress(ret, userId);
       }));
     }
     return () => {
       for (var fn of unpatches8) fn();
     };
   }
-  var React17, COPY_AVATAR_LINK, COPY_USERNAME, CDN_AVATAR_RE, ALERT_KEY, pendingUserId, pendingTimer;
+  var React17, ALERT_KEY, LONG_PRESS_DELAY;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
       init_asyncIteratorSymbol();
       init_promiseAllSettled();
-      init_type_of();
       init_jsxRuntime();
       React17 = __toESM(require_react());
       init_patcher();
       init_alerts();
       init_toasts();
-      init_utils();
       init_metro();
+      init_modules2();
       init_components();
       init_userMask();
-      COPY_AVATAR_LINK = /copy\s*avatar\s*(image\s*)?link/i;
-      COPY_USERNAME = /copy\s*user\s*name/i;
-      CDN_AVATAR_RE = /cdn\.discordapp\.com\/avatars\/(\d{10,20})\//;
       ALERT_KEY = "LocalMessagePreviewQuick";
-      pendingTimer = null;
+      LONG_PRESS_DELAY = 2e3;
     }
   });
 
