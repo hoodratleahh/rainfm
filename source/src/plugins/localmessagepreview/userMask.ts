@@ -60,7 +60,9 @@ function swapAuthor(author: any): any {
     if (!targetId) return author;
     const target = (UserStore as any).getUser?.(targetId);
     if (!target) return { ...author, id: targetId, username: "Unknown", global_name: null, avatar: null };
-    return { ...author, id: target.id, username: target.username, global_name: target.global_name ?? null, avatar: target.avatar ?? null };
+    // UserStore stores display name as camelCase globalName; message author object uses snake_case global_name
+    const displayName = target.globalName ?? target.global_name ?? null;
+    return { ...author, id: target.id, username: target.username, global_name: displayName, avatar: target.avatar ?? null };
 }
 
 function swapMessages(messages: any[]): void {

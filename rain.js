@@ -15669,11 +15669,12 @@ ${pendingInsertLink}` : pendingInsertLink;
       global_name: null,
       avatar: null
     };
+    var displayName = target.globalName ?? target.global_name ?? null;
     return {
       ...author,
       id: target.id,
       username: target.username,
-      global_name: target.global_name ?? null,
+      global_name: displayName,
       avatar: target.avatar ?? null
     };
   }
