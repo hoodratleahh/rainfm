@@ -9,6 +9,7 @@ import EditPreset from "./EditPreset";
 import { dispatchLocalMessage } from "./dispatch";
 import { defaultPreset, ensureRoot } from "./storageModel";
 import { useRootStore } from "./storage";
+import { clearAllMasks } from "./userMask";
 
 const { TableRow } = findByProps("TableRow");
 
@@ -83,6 +84,12 @@ export default function LocalMessagePreviewSettings() {
                     <TableRow
                         label="Clear cache"
                         onPress={() => { (store as any).cached = []; showToast("Cache cleared."); }}
+                        arrow
+                    />
+                    <TableRow
+                        label="Clear all profile swaps"
+                        subLabel="Removes every locally swapped profile"
+                        onPress={() => { clearAllMasks(); showToast("All profile swaps cleared."); }}
                         arrow
                     />
                 </TableRowGroup>

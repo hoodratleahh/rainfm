@@ -15815,57 +15815,92 @@ ${pendingInsertLink}` : pendingInsertLink;
       sourceUserId
     }));
   }
-  function extractUserId(props) {
-    if (!props) return void 0;
-    return props.userId ?? props.user?.id ?? props.author?.id ?? props.message?.author?.id ?? props.targetUserId ?? void 0;
+  function captureCopiedString(onPress) {
+    var clipboard2 = findByProps("setString", "getString", "hasString");
+    if (!clipboard2) return void 0;
+    var captured;
+    var unpatch6 = instead("setString", clipboard2, ([value]) => {
+      captured = String(value);
+    });
+    try {
+      onPress();
+    } catch (_2) {
+    }
+    unpatch6();
+    return captured;
   }
-  function addLongPress(ret, userId) {
-    if (!ret?.props) return;
-    ret.props.onLongPress = () => setTimeout(() => openQuickMessageBox(userId), 50);
-    ret.props.delayLongPress = LONG_PRESS_DELAY;
+  function resolveUserId(rowOnPress) {
+    var idOption = pendingOptions?.find((o) => typeof o?.label === "string" && USER_ID_LABEL.test(o.label) && typeof o.onPress === "function");
+    if (idOption) {
+      var copied = captureCopiedString(idOption.onPress)?.trim();
+      if (copied && SNOWFLAKE.test(copied)) return copied;
+    }
+    if (typeof rowOnPress === "function") {
+      var url2 = captureCopiedString(rowOnPress);
+      var match = url2 && AVATAR_URL_ID.exec(url2);
+      if (match) return match[1];
+    }
+    return void 0;
   }
-  function patchAvatarExports(exports, unpatches8) {
-    if (!exports) return;
-    unpatches8.push(after("default", exports, ([props], ret) => {
-      var userId = extractUserId(props);
-      if (!userId) return;
-      addLongPress(ret, userId);
-    }));
+  function makeLongPressHandler(rowOnPress) {
+    return () => {
+      var userId = resolveUserId(rowOnPress);
+      setTimeout(() => openQuickMessageBox(userId), 50);
+    };
+  }
+  function labelOf2(node) {
+    var props = node?.props;
+    if (!props) return "";
+    return [
+      props.label,
+      props.title,
+      props.text,
+      props.children
+    ].filter((v2) => typeof v2 === "string").join(" ");
+  }
+  function attachLongPress(node, handler, depth = 0) {
+    if (!node || depth > 8) return;
+    if (Array.isArray(node)) {
+      for (var child of node) attachLongPress(child, handler, depth + 1);
+      return;
+    }
+    var props = node.props;
+    if (!props) return;
+    if (typeof props.onPress === "function") {
+      props.onLongPress = handler;
+      props.delayLongPress = LONG_PRESS_DELAY;
+    }
+    attachLongPress(props.children, handler, depth + 1);
   }
   function patchQuickMessage() {
-    var _loop2 = function(name2) {
-      var mod = findByName(name2, false);
-      if (mod) {
-        patchAvatarExports(mod, unpatches8);
-      } else {
-        unpatches8.push(waitFor((exports) => exports?.name === name2 || exports?.default?.name === name2 ? exports : void 0, (exports) => patchAvatarExports(exports, unpatches8)));
-      }
-    };
     var unpatches8 = [];
-    var CANDIDATE_NAMES = [
-      "Avatar",
-      "UserAvatar",
-      "MessageAvatar",
-      "AvatarWithText",
-      "ChatAvatar",
-      "UserAvatarWithStatus",
-      "GuildMemberAvatar",
-      "ThreadMemberAvatar"
-    ];
-    for (var name of CANDIDATE_NAMES) _loop2(name);
-    var avatarByProps = findByProps("Avatar");
-    if (avatarByProps?.Avatar && typeof avatarByProps.Avatar === "function") {
-      unpatches8.push(after("Avatar", avatarByProps, ([props], ret) => {
-        var userId = extractUserId(props);
-        if (!userId) return;
-        addLongPress(ret, userId);
+    var sheetModule = findByProps("showSimpleActionSheet");
+    if (sheetModule) {
+      unpatches8.push(before("showSimpleActionSheet", sheetModule, ([config]) => {
+        var options = config?.options;
+        if (!Array.isArray(options)) return;
+        var avatarOption = options.find((o) => typeof o?.label === "string" && AVATAR_LINK_LABEL.test(o.label));
+        if (!avatarOption) return;
+        pendingOptions = options;
+        avatarOption.onLongPress = makeLongPressHandler(avatarOption.onPress);
+        avatarOption.delayLongPress = LONG_PRESS_DELAY;
+      }));
+    }
+    var rowModule = findByProps("ActionSheetRow");
+    if (rowModule?.ActionSheetRow) {
+      unpatches8.push(after("ActionSheetRow", rowModule, ([props], ret) => {
+        if (!AVATAR_LINK_LABEL.test(labelOf2({
+          props
+        }))) return;
+        attachLongPress(ret, makeLongPressHandler(props?.onPress));
       }));
     }
     return () => {
       for (var fn of unpatches8) fn();
+      pendingOptions = null;
     };
   }
-  var React17, ALERT_KEY, LONG_PRESS_DELAY;
+  var React17, ALERT_KEY, LONG_PRESS_DELAY, AVATAR_LINK_LABEL, USER_ID_LABEL, SNOWFLAKE, AVATAR_URL_ID, pendingOptions;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
@@ -15877,11 +15912,15 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_alerts();
       init_toasts();
       init_metro();
-      init_modules2();
       init_components();
       init_userMask();
       ALERT_KEY = "LocalMessagePreviewQuick";
       LONG_PRESS_DELAY = 2e3;
+      AVATAR_LINK_LABEL = /avatar\s*image\s*link/i;
+      USER_ID_LABEL = /user\s*id/i;
+      SNOWFLAKE = /^\d{15,25}$/;
+      AVATAR_URL_ID = /\/avatars\/(\d{15,25})\//;
+      pendingOptions = null;
     }
   });
 

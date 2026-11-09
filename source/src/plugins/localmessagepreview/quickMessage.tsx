@@ -1,19 +1,21 @@
 import * as React from "react";
-import { after } from "@api/patcher";
+import { after, before, instead } from "@api/patcher";
 import { dismissAlert, openAlert } from "@api/ui/alerts";
 import { showToast } from "@api/ui/toasts";
-import { findInReactTree } from "@lib/utils";
-import { findByName } from "@metro";
+import { findByProps } from "@metro";
 import { AlertActionButton, AlertModal, Button, Stack, TextInput } from "@metro/common/components";
-// Stack used for button layout; AlertActionButton for Cancel
-import { waitFor } from "@metro/internals/modules";
 
 import { applyMask, removeMask } from "./userMask";
 
-const MENU_NAMES = ["UserProfileOverflowMenu", "BotUserProfileOverflowMenu"];
-const COPY_USERNAME = /copy\s*user\s*name/i;
-const FALLBACK_LABEL = "Quick local message";
 const ALERT_KEY = "LocalMessagePreviewQuick";
+const LONG_PRESS_DELAY = 2000;
+
+const AVATAR_LINK_LABEL = /avatar\s*image\s*link/i;
+const USER_ID_LABEL = /user\s*id/i;
+const SNOWFLAKE = /^\d{15,25}$/;
+const AVATAR_URL_ID = /\/avatars\/(\d{15,25})\//;
+
+// ── Alert UI ──────────────────────────────────────────────────────────────────
 
 function QuickMessageAlert({ sourceUserId }: { sourceUserId?: string }) {
     const [targetId, setTargetId] = React.useState("");
@@ -70,48 +72,109 @@ function openQuickMessageBox(sourceUserId?: string) {
     openAlert(ALERT_KEY, <QuickMessageAlert sourceUserId={sourceUserId} />);
 }
 
-function extractUserId(args: any[]): string | undefined {
-    const props = args?.[0]?.props ?? args?.[0];
-    return props?.user?.id ?? props?.userId ?? undefined;
+// ── User ID capture ───────────────────────────────────────────────────────────
+
+// The sheet's own rows already know the user: "Copy User ID" writes the raw
+// snowflake and "Copy Avatar Image Link" writes a URL containing it. Running a
+// row's handler with clipboard writes redirected reads the value out without
+// touching the real clipboard.
+function captureCopiedString(onPress: () => void): string | undefined {
+    const clipboard = findByProps("setString", "getString", "hasString") as any;
+    if (!clipboard) return undefined;
+
+    let captured: string | undefined;
+    const unpatch = instead("setString", clipboard, ([value]: any[]) => { captured = String(value); });
+    try { onPress(); } catch (_) { /* row handler blew up; nothing to read */ }
+    unpatch();
+    return captured;
 }
 
-function patchMenu(args: any[], ret: any) {
-    const userId = extractUserId(args);
-    const node = findInReactTree(ret, (n: any) => Array.isArray(n?.props?.items) && Array.isArray(n.props.items[0]));
-    const groups: any[][] | undefined = node?.props?.items;
-    if (!groups) return;
+let pendingOptions: any[] | null = null;
 
-    let hooked = false;
-    for (const group of groups) {
-        for (const item of group) {
-            if (typeof item?.label !== "string" || !COPY_USERNAME.test(item.label)) continue;
-            hooked = true;
-            if (item.__lmpWrapped) continue;
-            const original = item.action;
-            item.action = () => {
-                setTimeout(() => openQuickMessageBox(userId), 300);
-            };
-            item.__lmpWrapped = true;
-        }
+function resolveUserId(rowOnPress?: () => void): string | undefined {
+    const idOption = pendingOptions?.find(
+        o => typeof o?.label === "string" && USER_ID_LABEL.test(o.label) && typeof o.onPress === "function",
+    );
+    if (idOption) {
+        const copied = captureCopiedString(idOption.onPress)?.trim();
+        if (copied && SNOWFLAKE.test(copied)) return copied;
     }
 
-    if (!hooked && !groups[0].some((i: any) => i?.label === FALLBACK_LABEL)) {
-        groups[0].push({ label: FALLBACK_LABEL, action: () => setTimeout(() => openQuickMessageBox(userId), 300) });
+    if (typeof rowOnPress === "function") {
+        const url = captureCopiedString(rowOnPress);
+        const match = url && AVATAR_URL_ID.exec(url);
+        if (match) return match[1];
     }
+
+    return undefined;
 }
+
+function makeLongPressHandler(rowOnPress?: () => void) {
+    return () => {
+        const userId = resolveUserId(rowOnPress);
+        setTimeout(() => openQuickMessageBox(userId), 50);
+    };
+}
+
+// ── Element tree helpers ──────────────────────────────────────────────────────
+
+function labelOf(node: any): string {
+    const props = node?.props;
+    if (!props) return "";
+    return [props.label, props.title, props.text, props.children]
+        .filter(v => typeof v === "string")
+        .join(" ");
+}
+
+// Attach to every pressable level we can reach — the row's root may be a
+// composite that forwards onLongPress, or the host element one level down.
+function attachLongPress(node: any, handler: () => void, depth = 0): void {
+    if (!node || depth > 8) return;
+    if (Array.isArray(node)) {
+        for (const child of node) attachLongPress(child, handler, depth + 1);
+        return;
+    }
+    const props = node.props;
+    if (!props) return;
+    if (typeof props.onPress === "function") {
+        props.onLongPress = handler;
+        props.delayLongPress = LONG_PRESS_DELAY;
+    }
+    attachLongPress(props.children, handler, depth + 1);
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
 
 export default function patchQuickMessage(): () => void {
     const unpatches: (() => void)[] = [];
-    for (const name of MENU_NAMES) {
-        const mod = findByName(name, false);
-        if (mod) {
-            unpatches.push(after("default", mod, patchMenu));
-        } else {
-            unpatches.push(waitFor(
-                (exports: any) => (exports?.name === name || exports?.default?.name === name) ? exports : undefined,
-                (exports: any) => unpatches.push(after("default", exports, patchMenu)),
-            ));
-        }
+
+    const sheetModule = findByProps("showSimpleActionSheet") as any;
+    if (sheetModule) {
+        unpatches.push(before("showSimpleActionSheet", sheetModule, ([config]: any[]) => {
+            const options = config?.options;
+            if (!Array.isArray(options)) return;
+
+            const avatarOption = options.find(
+                o => typeof o?.label === "string" && AVATAR_LINK_LABEL.test(o.label),
+            );
+            if (!avatarOption) return;
+
+            pendingOptions = options;
+            avatarOption.onLongPress = makeLongPressHandler(avatarOption.onPress);
+            avatarOption.delayLongPress = LONG_PRESS_DELAY;
+        }));
     }
-    return () => { for (const fn of unpatches) fn(); };
+
+    const rowModule = findByProps("ActionSheetRow") as any;
+    if (rowModule?.ActionSheetRow) {
+        unpatches.push(after("ActionSheetRow", rowModule, ([props]: any[], ret: any) => {
+            if (!AVATAR_LINK_LABEL.test(labelOf({ props }))) return;
+            attachLongPress(ret, makeLongPressHandler(props?.onPress));
+        }));
+    }
+
+    return () => {
+        for (const fn of unpatches) fn();
+        pendingOptions = null;
+    };
 }
