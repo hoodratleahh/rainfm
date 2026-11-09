@@ -15751,16 +15751,14 @@ ${pendingInsertLink}` : pendingInsertLink;
     pendingTimer = setTimeout(() => {
       pendingUserId = void 0;
       pendingTimer = null;
-    }, 2e3);
+    }, 5e3);
   }
   function consumePending() {
-    var uid = pendingUserId;
     pendingUserId = void 0;
     if (pendingTimer !== null) {
       clearTimeout(pendingTimer);
       pendingTimer = null;
     }
-    return uid;
   }
   function QuickMessageAlert({ sourceUserId }) {
     var [targetId, setTargetId] = React17.useState("");
@@ -15832,14 +15830,11 @@ ${pendingInsertLink}` : pendingInsertLink;
       sourceUserId
     }));
   }
-  function extractUserId(args) {
-    var props = args?.[0]?.props ?? args?.[0];
-    return props?.user?.id ?? props?.userId ?? void 0;
-  }
   function getLabel(item) {
     if (typeof item?.label === "string") return item.label;
     if (typeof item?.text === "string") return item.text;
     if (typeof item?.props?.label === "string") return item.props.label;
+    if (typeof item?.props?.text === "string") return item.props.text;
     return "";
   }
   function collectItems(raw) {
@@ -15849,16 +15844,42 @@ ${pendingInsertLink}` : pendingInsertLink;
   }
   function hookItem(item, handler) {
     item.__lmpWrapped = true;
-    if (typeof item.onPress === "function") item.onPress = handler;
-    if (typeof item.action === "function") item.action = handler;
-    if (typeof item.onPress !== "function" && typeof item.action !== "function") {
+    var hasPress = typeof item.onPress === "function";
+    var hasAction = typeof item.action === "function";
+    if (hasPress) item.onPress = handler;
+    if (hasAction) item.action = handler;
+    if (!hasPress && !hasAction) {
       item.onPress = handler;
       item.action = handler;
     }
   }
-  function tryHookSheet(tree, userId) {
+  function uidFromSheetProps(args) {
+    for (var i = 2; i < args.length; i++) {
+      var p = args[i];
+      if (!p || typeof p !== "object") continue;
+      var uid = p?.user?.id ?? p?.userId ?? p?.targetUserId ?? p?.sourceUserId ?? void 0;
+      if (uid && typeof uid === "string") return uid;
+      var inner = p?.params ?? p?.initialProps ?? p?.props;
+      if (inner && typeof inner === "object") {
+        var uid2 = inner?.user?.id ?? inner?.userId ?? void 0;
+        if (uid2 && typeof uid2 === "string") return uid2;
+      }
+    }
+    return void 0;
+  }
+  function uidFromTree(tree) {
+    var node = findInReactTree(tree, (n) => {
+      if (!n?.props) return false;
+      return !!(n.props.userId || n.props?.user?.id || n.props?.targetUserId);
+    });
+    if (!node) return void 0;
+    return node.props.userId ?? node.props?.user?.id ?? node.props?.targetUserId ?? void 0;
+  }
+  function tryHookSheet(tree, hintUid) {
+    var uid = hintUid ?? uidFromTree(tree);
+    if (!uid) return void 0;
     var handler = () => {
-      setTimeout(() => openQuickMessageBox(userId), 300);
+      setTimeout(() => openQuickMessageBox(uid), 300);
     };
     var nodeA = findInReactTree(tree, (n) => Array.isArray(n?.props?.items) && n.props.items.length > 0);
     if (nodeA) {
@@ -15867,74 +15888,84 @@ ${pendingInsertLink}` : pendingInsertLink;
         if (!item || item.__lmpWrapped) continue;
         if (COPY_AVATAR_LINK.test(getLabel(item))) {
           hookItem(item, handler);
-          return;
+          return uid;
         }
       }
       for (var item1 of items) {
         if (!item1 || item1.__lmpWrapped) continue;
         if (COPY_USERNAME.test(getLabel(item1))) {
           hookItem(item1, handler);
-          return;
+          return uid;
         }
       }
     }
-    var avatarEl = findInReactTree(tree, (n) => n?.props && typeof n.props.label === "string" && COPY_AVATAR_LINK.test(n.props.label));
+    var avatarEl = findInReactTree(tree, (n) => n?.props && (typeof n.props.label === "string" && COPY_AVATAR_LINK.test(n.props.label) || typeof n.props.text === "string" && COPY_AVATAR_LINK.test(n.props.text)));
     if (avatarEl?.props) {
       avatarEl.props.onPress = handler;
-      return;
+      if (avatarEl.props.action !== void 0) avatarEl.props.action = handler;
+      return uid;
     }
-    var usernameEl = findInReactTree(tree, (n) => n?.props && typeof n.props.label === "string" && COPY_USERNAME.test(n.props.label));
+    var usernameEl = findInReactTree(tree, (n) => n?.props && (typeof n.props.label === "string" && COPY_USERNAME.test(n.props.label) || typeof n.props.text === "string" && COPY_USERNAME.test(n.props.text)));
     if (usernameEl?.props) {
       usernameEl.props.onPress = handler;
+      if (usernameEl.props.action !== void 0) usernameEl.props.action = handler;
+      return uid;
     }
+    return void 0;
   }
   function patchQuickMessage() {
     var _loop2 = function(name2) {
+      var patchExports = (exports) => {
+        if (!exports) return;
+        unpatches8.push(after("default", exports, (args, _ret) => {
+          var props = args?.[0]?.props ?? args?.[0];
+          var uid = props?.user?.id ?? props?.userId ?? void 0;
+          if (uid) setPendingUser(String(uid));
+        }));
+      };
       var mod = findByName(name2, false);
       if (mod) {
-        unpatches8.push(after("default", mod, (args, _ret) => {
-          var uid = extractUserId(args);
-          if (uid) setPendingUser(uid);
-        }));
+        patchExports(mod);
       } else {
-        unpatches8.push(waitFor((exports) => exports?.name === name2 || exports?.default?.name === name2 ? exports : void 0, (exports) => unpatches8.push(after("default", exports, (args, _ret) => {
-          var uid = extractUserId(args);
-          if (uid) setPendingUser(uid);
-        }))));
+        unpatches8.push(waitFor((exports) => exports?.name === name2 || exports?.default?.name === name2 ? exports : void 0, patchExports));
       }
     };
     var unpatches8 = [];
-    for (var name of MENU_NAMES) _loop2(name);
     var LazyActionSheet8 = findByProps("openLazy", "hideActionSheet");
     if (LazyActionSheet8) {
       unpatches8.push(before("openLazy", LazyActionSheet8, (args) => {
-        if (!pendingUserId) return;
-        var uid = pendingUserId;
         var origGetter = args[0];
         if (typeof origGetter !== "function") return;
+        var directUid = uidFromSheetProps(args);
+        var snapPending = pendingUserId;
         args[0] = () => {
           var result = origGetter();
           if (result && typeof result.then === "function") {
             return result.then((m2) => {
               if (!m2?.default) return m2;
-              consumePending();
               var unpatch6 = after("default", m2, (_a, ret) => {
                 unpatch6();
-                tryHookSheet(ret, uid);
+                var hintUid = directUid ?? snapPending;
+                var used = tryHookSheet(ret, hintUid);
+                if (used && !directUid && snapPending) consumePending();
               });
               return m2;
             });
           }
-          consumePending();
           return result;
         };
       }));
     }
+    var MENU_NAMES = [
+      "UserProfileOverflowMenu",
+      "BotUserProfileOverflowMenu"
+    ];
+    for (var name of MENU_NAMES) _loop2(name);
     return () => {
       for (var fn of unpatches8) fn();
     };
   }
-  var React17, MENU_NAMES, COPY_AVATAR_LINK, COPY_USERNAME, ALERT_KEY, pendingUserId, pendingTimer;
+  var React17, COPY_AVATAR_LINK, COPY_USERNAME, ALERT_KEY, pendingUserId, pendingTimer;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
@@ -15947,13 +15978,9 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_toasts();
       init_utils();
       init_metro();
-      init_components();
       init_modules2();
+      init_components();
       init_userMask();
-      MENU_NAMES = [
-        "UserProfileOverflowMenu",
-        "BotUserProfileOverflowMenu"
-      ];
       COPY_AVATAR_LINK = /copy\s*avatar\s*(image\s*)?link/i;
       COPY_USERNAME = /copy\s*user\s*name/i;
       ALERT_KEY = "LocalMessagePreviewQuick";
