@@ -15621,20 +15621,47 @@ ${pendingInsertLink}` : pendingInsertLink;
   // src/plugins/localmessagepreview/userMask.ts
   function applyMask(sourceId, targetId) {
     masks.set(sourceId, targetId);
-    refreshCurrentChannel();
+    try {
+      var profileActions = findByProps("fetchProfile");
+      profileActions?.fetchProfile?.(targetId);
+    } catch (_2) {
+    }
+    setTimeout(() => refreshCurrentChannel(), 400);
   }
   function refreshCurrentChannel() {
     try {
       var channelId = SelectedChannelStore.getChannelId?.();
       if (!channelId) return;
-      var ChannelStore2 = findByProps("getChannel", "getDMFromUserId");
-      var channel = ChannelStore2?.getChannel?.(channelId);
-      var guildId = channel?.guild_id ?? null;
-      FluxDispatcher.dispatch({
-        type: "CHANNEL_SELECT",
-        channelId,
-        guildId
-      });
+      for (var [sourceId, targetId] of masks) {
+        var target = UserStore.getUser?.(targetId);
+        if (target) {
+          FluxDispatcher.dispatch({
+            type: "USER_UPDATE",
+            user: {
+              ...target,
+              id: sourceId
+            }
+          });
+        }
+      }
+      var MessageStore2 = findByProps("getMessages", "getMessage");
+      if (!MessageStore2) return;
+      var collection = MessageStore2.getMessages(channelId);
+      if (!collection) return;
+      var msgs = collection._array ?? collection.toArray?.() ?? [];
+      for (var msg of msgs) {
+        if (msg?.author && masks.has(String(msg.author.id))) {
+          FluxDispatcher.dispatch({
+            type: "MESSAGE_UPDATE",
+            message: {
+              ...msg,
+              author: swapAuthor(msg.author),
+              channel_id: channelId
+            },
+            optimistic: false
+          });
+        }
+      }
     } catch (_2) {
     }
   }
@@ -15685,6 +15712,13 @@ ${pendingInsertLink}` : pendingInsertLink;
       } else if (e.type === "MESSAGE_CREATE") {
         if (e.message?.author && masks.has(String(e.message.author.id))) {
           e.message.author = swapAuthor(e.message.author);
+        }
+      } else if (e.type === "USER_PROFILE_FETCH_SUCCESS") {
+        var uid = String(e.user?.id ?? e.userId ?? "");
+        if (uid && [
+          ...masks.values()
+        ].includes(uid)) {
+          refreshCurrentChannel();
         }
       }
     };
