@@ -15797,29 +15797,34 @@ ${pendingInsertLink}` : pendingInsertLink;
     var props = args?.[0]?.props ?? args?.[0];
     return props?.user?.id ?? props?.userId ?? void 0;
   }
+  function getLabel(item) {
+    return typeof item?.label === "string" ? item.label : typeof item?.text === "string" ? item.text : typeof item?.title === "string" ? item.title : "";
+  }
+  function collectItems(raw) {
+    if (!Array.isArray(raw)) return [];
+    if (raw.length > 0 && Array.isArray(raw[0])) return raw.flatMap((g2) => g2);
+    return raw;
+  }
   function patchMenu(args, ret) {
     var userId = extractUserId(args);
-    var node = findInReactTree(ret, (n) => Array.isArray(n?.props?.items) && Array.isArray(n.props.items[0]));
-    var groups = node?.props?.items;
-    if (!groups) return;
-    var hooked = false;
-    for (var group of groups) {
-      for (var item of group) {
-        if (typeof item?.label !== "string" || !COPY_USERNAME.test(item.label)) continue;
-        hooked = true;
-        if (item.__lmpWrapped) continue;
-        var original = item.action;
-        item.action = () => {
-          setTimeout(() => openQuickMessageBox(userId), 300);
-        };
-        item.__lmpWrapped = true;
+    var node = findInReactTree(ret, (n) => Array.isArray(n?.props?.items) && n.props.items.length > 0);
+    if (!node) return;
+    var raw = node.props.items;
+    var items = collectItems(raw);
+    for (var item of items) {
+      if (!item || item.__lmpWrapped) continue;
+      if (!COPY_USERNAME.test(getLabel(item))) continue;
+      item.__lmpWrapped = true;
+      var handler = () => {
+        setTimeout(() => openQuickMessageBox(userId), 300);
+      };
+      if (typeof item.onPress === "function") item.onPress = handler;
+      if (typeof item.action === "function") item.action = handler;
+      if (typeof item.onPress !== "function" && typeof item.action !== "function") {
+        item.onPress = handler;
+        item.action = handler;
       }
-    }
-    if (!hooked && !groups[0].some((i) => i?.label === FALLBACK_LABEL)) {
-      groups[0].push({
-        label: FALLBACK_LABEL,
-        action: () => setTimeout(() => openQuickMessageBox(userId), 300)
-      });
+      break;
     }
   }
   function patchQuickMessage() {
@@ -15837,7 +15842,7 @@ ${pendingInsertLink}` : pendingInsertLink;
       for (var fn of unpatches8) fn();
     };
   }
-  var React17, MENU_NAMES, COPY_USERNAME, FALLBACK_LABEL, ALERT_KEY;
+  var React17, MENU_NAMES, COPY_USERNAME, ALERT_KEY;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
@@ -15858,7 +15863,6 @@ ${pendingInsertLink}` : pendingInsertLink;
         "BotUserProfileOverflowMenu"
       ];
       COPY_USERNAME = /copy\s*user\s*name/i;
-      FALLBACK_LABEL = "Quick local message";
       ALERT_KEY = "LocalMessagePreviewQuick";
     }
   });
