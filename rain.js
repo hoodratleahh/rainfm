@@ -15667,8 +15667,14 @@ ${pendingInsertLink}` : pendingInsertLink;
     var saved = rootSettings.masks;
     if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
     for (var [source, target] of Object.entries(saved)) {
-      if (typeof target === "string" && target) masks.set(source, target);
+      if (typeof target === "string" && target && !masks.has(source)) masks.set(source, target);
     }
+    if (masks.size > 0) refreshCurrentChannel();
+  }
+  function getAllMasks() {
+    return [
+      ...masks
+    ];
   }
   function applyMask(sourceId, targetId) {
     masks.set(sourceId, targetId);
@@ -15878,28 +15884,43 @@ ${pendingInsertLink}` : pendingInsertLink;
     }));
   }
   function ResetProfileAlert({ sourceUserId }) {
-    var sources2 = sourceUserId ? findMaskSources(sourceUserId) : [];
-    var swapped = sources2.length > 0;
+    var matched = sourceUserId ? findMaskSources(sourceUserId) : [];
+    var sources2 = matched.length > 0 ? matched : getAllMasks().map(([source]) => source);
+    var pairs = sources2.map((s) => `${s} \u2192 ${getMaskTarget(s)}`).join("\n");
+    var detected = `Detected ID: ${sourceUserId ?? "none"}`;
     var reset = () => {
       for (var source of sources2) removeMask(source);
       dismissAlert(RESET_ALERT_KEY);
-      showToast("Profile reset.");
+      showToast(sources2.length > 1 ? "Profiles reset." : "Profile reset.");
     };
-    return /* @__PURE__ */ jsx(AlertModal, {
-      title: swapped ? "Reset profile" : "Not swapped",
-      content: swapped ? `Saved swap:
-${sources2.map((s) => `${s} \u2192 ${getMaskTarget(s)}`).join("\n")}
+    var title = "No swaps saved";
+    var content = `Nothing is swapped right now.
+${detected}`;
+    if (matched.length > 0) {
+      title = "Reset profile";
+      content = `Saved swap:
+${pairs}
 
-Put it back to normal?` : "This profile isn't swapped right now.",
+Put it back to normal?`;
+    } else if (sources2.length > 0) {
+      title = "Reset swaps";
+      content = `Couldn't match this profile to a swap. All saved swaps:
+${pairs}
+
+${detected}`;
+    }
+    return /* @__PURE__ */ jsx(AlertModal, {
+      title,
+      content,
       actions: /* @__PURE__ */ jsxs(Stack, {
         children: [
-          swapped ? /* @__PURE__ */ jsx(Button, {
-            text: "Reset to normal",
+          sources2.length > 0 ? /* @__PURE__ */ jsx(Button, {
+            text: matched.length > 0 ? "Reset to normal" : "Reset all",
             variant: "primary",
             onPress: reset
           }) : null,
           /* @__PURE__ */ jsx(AlertActionButton, {
-            text: swapped ? "Cancel" : "Close",
+            text: sources2.length > 0 ? "Cancel" : "Close",
             variant: "secondary"
           })
         ]
@@ -16529,12 +16550,13 @@ Put it back to normal?` : "This profile isn't swapped right now.",
   __export(localmessagepreview_exports, {
     default: () => localmessagepreview_default
   });
-  var unpatches6, localmessagepreview_default;
+  var unpatches6, running, localmessagepreview_default;
   var init_localmessagepreview = __esm({
     "src/plugins/localmessagepreview/index.ts"() {
       "use strict";
       init_asyncIteratorSymbol();
       init_promiseAllSettled();
+      init_storage();
       init_plugins3();
       init_dispatch();
       init_quickMessage();
@@ -16542,6 +16564,7 @@ Put it back to normal?` : "This profile isn't swapped right now.",
       init_storage21();
       init_userMask();
       unpatches6 = [];
+      running = false;
       localmessagepreview_default = definePlugin({
         name: "LocalMessagePreview",
         description: "Locally swap profiles in chat. Never sent to Discord.",
@@ -16552,25 +16575,31 @@ Put it back to normal?` : "This profile isn't swapped right now.",
           }
         ],
         id: "localmessagepreview",
-        version: "3.0.0",
+        version: "3.1.0",
         settings: LocalMessagePreviewSettings,
         start() {
-          loadMasks();
+          running = true;
           unpatches6.push(patchQuickMessage());
           unpatches6.push(patchUserStoreMask());
-          var st = rootSettings;
-          if (st.autoReplayOnLoad && Array.isArray(st.cached) && st.cached.length > 0) {
-            setTimeout(() => {
-              for (var msg of st.cached) {
-                try {
-                  dispatchLocalMessage(msg);
-                } catch (_2) {
+          waitForHydration(useRootStore).then(() => {
+            if (!running) return;
+            loadMasks();
+            var st = rootSettings;
+            if (st.autoReplayOnLoad && Array.isArray(st.cached) && st.cached.length > 0) {
+              setTimeout(() => {
+                if (!running) return;
+                for (var msg of st.cached) {
+                  try {
+                    dispatchLocalMessage(msg);
+                  } catch (_2) {
+                  }
                 }
-              }
-            }, 1500);
-          }
+              }, 1500);
+            }
+          });
         },
         stop() {
+          running = false;
           for (var fn of unpatches6) fn();
           unpatches6.length = 0;
           forgetMasks();

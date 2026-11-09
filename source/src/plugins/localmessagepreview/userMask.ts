@@ -21,8 +21,13 @@ export function loadMasks(): void {
     const saved = (rootSettings as any).masks;
     if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
     for (const [source, target] of Object.entries(saved)) {
-        if (typeof target === "string" && target) masks.set(source, target);
+        if (typeof target === "string" && target && !masks.has(source)) masks.set(source, target);
     }
+    if (masks.size > 0) refreshCurrentChannel();
+}
+
+export function getAllMasks(): [string, string][] {
+    return [...masks];
 }
 
 export function applyMask(sourceId: string, targetId: string) {

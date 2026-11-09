@@ -5,7 +5,7 @@ import { showToast } from "@api/ui/toasts";
 import { findByProps } from "@metro";
 import { AlertActionButton, AlertModal, Button, Stack, TextInput } from "@metro/common/components";
 
-import { applyMask, findMaskSources, getMaskTarget, removeMask } from "./userMask";
+import { applyMask, findMaskSources, getAllMasks, getMaskTarget, removeMask } from "./userMask";
 
 const ALERT_KEY = "LocalMessagePreviewQuick";
 const RESET_ALERT_KEY = "LocalMessagePreviewReset";
@@ -85,24 +85,41 @@ function openQuickMessageBox(sourceUserId?: string) {
 }
 
 function ResetProfileAlert({ sourceUserId }: { sourceUserId?: string }) {
-    const sources = sourceUserId ? findMaskSources(sourceUserId) : [];
-    const swapped = sources.length > 0;
+    const matched = sourceUserId ? findMaskSources(sourceUserId) : [];
+    // No match for this profile still leaves every saved swap resettable.
+    const sources = matched.length > 0 ? matched : getAllMasks().map(([source]) => source);
+    const pairs = sources.map(s => `${s} → ${getMaskTarget(s)}`).join("\n");
+    const detected = `Detected ID: ${sourceUserId ?? "none"}`;
 
     const reset = () => {
         for (const source of sources) removeMask(source);
         dismissAlert(RESET_ALERT_KEY);
-        showToast("Profile reset.");
+        showToast(sources.length > 1 ? "Profiles reset." : "Profile reset.");
     };
 
+    let title = "No swaps saved";
+    let content = `Nothing is swapped right now.\n${detected}`;
+    if (matched.length > 0) {
+        title = "Reset profile";
+        content = `Saved swap:\n${pairs}\n\nPut it back to normal?`;
+    } else if (sources.length > 0) {
+        title = "Reset swaps";
+        content = `Couldn't match this profile to a swap. All saved swaps:\n${pairs}\n\n${detected}`;
+    }
+
     return <AlertModal
-        title={swapped ? "Reset profile" : "Not swapped"}
-        content={swapped
-            ? `Saved swap:\n${sources.map(s => `${s} → ${getMaskTarget(s)}`).join("\n")}\n\nPut it back to normal?`
-            : "This profile isn't swapped right now."}
+        title={title}
+        content={content}
         actions={
             <Stack>
-                {swapped ? <Button text="Reset to normal" variant="primary" onPress={reset} /> : null}
-                <AlertActionButton text={swapped ? "Cancel" : "Close"} variant="secondary" />
+                {sources.length > 0
+                    ? <Button
+                        text={matched.length > 0 ? "Reset to normal" : "Reset all"}
+                        variant="primary"
+                        onPress={reset}
+                    />
+                    : null}
+                <AlertActionButton text={sources.length > 0 ? "Cancel" : "Close"} variant="secondary" />
             </Stack>
         }
     />;
