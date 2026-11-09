@@ -4,7 +4,7 @@ import { dispatchLocalMessage } from "./dispatch";
 import patchQuickMessage from "./quickMessage";
 import settings from "./settings";
 import { rootSettings } from "./storage";
-import { clearAllMasks, patchUserStoreMask } from "./userMask";
+import { forgetMasks, loadMasks, patchUserStoreMask } from "./userMask";
 
 const unpatches: (() => void)[] = [];
 
@@ -16,6 +16,7 @@ export default definePlugin({
     version: "3.0.0",
     settings,
     start() {
+        loadMasks();
         unpatches.push(patchQuickMessage());
         unpatches.push(patchUserStoreMask());
 
@@ -32,6 +33,6 @@ export default definePlugin({
     stop() {
         for (const fn of unpatches) fn();
         unpatches.length = 0;
-        clearAllMasks();
+        forgetMasks();
     },
 });

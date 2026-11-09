@@ -5,13 +5,14 @@ import { showToast } from "@api/ui/toasts";
 import { findByProps } from "@metro";
 import { AlertActionButton, AlertModal, Button, Stack, TextInput } from "@metro/common/components";
 
-import { applyMask, removeMask } from "./userMask";
+import { applyMask, getMaskTarget, removeMask } from "./userMask";
 
 const ALERT_KEY = "LocalMessagePreviewQuick";
+const RESET_ALERT_KEY = "LocalMessagePreviewReset";
 const LONG_PRESS_DELAY = 2000;
 
 // "Copy Username" must not be read as "Copy User ID" — hence user\s*name.
-const TRIGGER_LABEL = /avatar\s*image\s*link|user\s*name/i;
+const SWAP_LABEL = /avatar\s*image\s*link|user\s*name/i;
 const USER_ID_LABEL = /user\s*id/i;
 const SNOWFLAKE = /^\d{15,25}$/;
 const AVATAR_URL_ID = /\/avatars\/(\d{15,25})\//;
@@ -73,6 +74,33 @@ function openQuickMessageBox(sourceUserId?: string) {
     openAlert(ALERT_KEY, <QuickMessageAlert sourceUserId={sourceUserId} />);
 }
 
+function ResetProfileAlert({ sourceUserId }: { sourceUserId?: string }) {
+    const targetId = sourceUserId ? getMaskTarget(sourceUserId) : undefined;
+
+    const reset = () => {
+        if (sourceUserId) removeMask(sourceUserId);
+        dismissAlert(RESET_ALERT_KEY);
+        showToast("Profile reset.");
+    };
+
+    return <AlertModal
+        title={targetId ? "Reset profile" : "Not swapped"}
+        content={targetId
+            ? `This profile is saved as ${targetId}. Put it back to normal?`
+            : "This profile isn't swapped right now."}
+        actions={
+            <Stack>
+                {targetId ? <Button text="Reset to normal" variant="primary" onPress={reset} /> : null}
+                <AlertActionButton text={targetId ? "Cancel" : "Close"} variant="secondary" />
+            </Stack>
+        }
+    />;
+}
+
+function openResetBox(sourceUserId?: string) {
+    openAlert(RESET_ALERT_KEY, <ResetProfileAlert sourceUserId={sourceUserId} />);
+}
+
 // ── User ID capture ───────────────────────────────────────────────────────────
 
 // The sheet's own rows already know the user: "Copy User ID" writes the raw
@@ -110,11 +138,17 @@ function resolveUserId(rowOnPress?: () => void): string | undefined {
     return undefined;
 }
 
-function makeLongPressHandler(rowOnPress?: () => void) {
+function makeLongPressHandler(rowOnPress: (() => void) | undefined, open: (userId?: string) => void) {
     return () => {
         const userId = resolveUserId(rowOnPress);
-        setTimeout(() => openQuickMessageBox(userId), 50);
+        setTimeout(() => open(userId), 50);
     };
+}
+
+function handlerFor(label: string): ((userId?: string) => void) | undefined {
+    if (SWAP_LABEL.test(label)) return openQuickMessageBox;
+    if (USER_ID_LABEL.test(label)) return openResetBox;
+    return undefined;
 }
 
 // ── Element tree helpers ──────────────────────────────────────────────────────
@@ -155,24 +189,24 @@ export default function patchQuickMessage(): () => void {
             const options = config?.options;
             if (!Array.isArray(options)) return;
 
-            const triggers = options.filter(
-                o => typeof o?.label === "string" && TRIGGER_LABEL.test(o.label),
-            );
-            if (triggers.length === 0) return;
-
-            pendingOptions = options;
-            for (const option of triggers) {
-                option.onLongPress = makeLongPressHandler(option.onPress);
+            let matched = false;
+            for (const option of options) {
+                const open = typeof option?.label === "string" ? handlerFor(option.label) : undefined;
+                if (!open) continue;
+                matched = true;
+                option.onLongPress = makeLongPressHandler(option.onPress, open);
                 option.delayLongPress = LONG_PRESS_DELAY;
             }
+            if (matched) pendingOptions = options;
         }));
     }
 
     const rowModule = findByProps("ActionSheetRow") as any;
     if (rowModule?.ActionSheetRow) {
         unpatches.push(after("ActionSheetRow", rowModule, ([props]: any[], ret: any) => {
-            if (!TRIGGER_LABEL.test(labelOf({ props }))) return;
-            attachLongPress(ret, makeLongPressHandler(props?.onPress));
+            const open = handlerFor(labelOf({ props }));
+            if (!open) return;
+            attachLongPress(ret, makeLongPressHandler(props?.onPress, open));
         }));
     }
 

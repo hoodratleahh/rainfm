@@ -87,7 +87,7 @@ export default function LocalMessagePreviewSettings() {
                         arrow
                     />
                     <TableRow
-                        label="Clear all profile swaps"
+                        label={`Clear all profile swaps (${Object.keys((store as any).masks ?? {}).length})`}
                         subLabel="Removes every locally swapped profile"
                         onPress={() => { clearAllMasks(); showToast("All profile swaps cleared."); }}
                         arrow

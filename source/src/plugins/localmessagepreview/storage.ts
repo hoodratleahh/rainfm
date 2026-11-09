@@ -8,4 +8,5 @@ export const {
     rules: [],
     cached: [],
     autoReplayOnLoad: true,
+    masks: {},
 });

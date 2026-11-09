@@ -15640,10 +15640,56 @@ ${pendingInsertLink}` : pendingInsertLink;
     }
   });
 
+  // src/plugins/localmessagepreview/storage.ts
+  var useRootStore, rootSettings;
+  var init_storage21 = __esm({
+    "src/plugins/localmessagepreview/storage.ts"() {
+      "use strict";
+      init_asyncIteratorSymbol();
+      init_promiseAllSettled();
+      init_storage();
+      ({ useStore: useRootStore, settings: rootSettings } = createPluginStore("localmessagepreview", {
+        rules: [],
+        cached: [],
+        autoReplayOnLoad: true,
+        masks: {}
+      }));
+    }
+  });
+
   // src/plugins/localmessagepreview/userMask.ts
+  function persist2() {
+    var out = {};
+    for (var [source, target] of masks) out[source] = target;
+    rootSettings.masks = out;
+  }
+  function loadMasks() {
+    var saved = rootSettings.masks;
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
+    for (var [source, target] of Object.entries(saved)) {
+      if (typeof target === "string" && target) masks.set(source, target);
+    }
+  }
   function applyMask(sourceId, targetId) {
     masks.set(sourceId, targetId);
+    persist2();
     refreshCurrentChannel();
+  }
+  function removeMask(sourceId) {
+    masks.delete(sourceId);
+    persist2();
+    refreshCurrentChannel();
+  }
+  function clearAllMasks() {
+    masks.clear();
+    persist2();
+    refreshCurrentChannel();
+  }
+  function forgetMasks() {
+    masks.clear();
+  }
+  function getMaskTarget(sourceId) {
+    return masks.get(sourceId);
   }
   function refreshCurrentChannel() {
     try {
@@ -15655,11 +15701,7 @@ ${pendingInsertLink}` : pendingInsertLink;
       if (!collection) return;
       var rawMsgs = collection._array ?? collection.toArray?.() ?? [];
       var msgs = rawMsgs.slice().reverse();
-      for (var msg of msgs) {
-        if (msg?.author && masks.has(String(msg.author.id))) {
-          msg.author = swapAuthor(msg.author);
-        }
-      }
+      swapMessages(msgs);
       FluxDispatcher.dispatch({
         type: "LOAD_MESSAGES_SUCCESS",
         channelId,
@@ -15672,12 +15714,6 @@ ${pendingInsertLink}` : pendingInsertLink;
       });
     } catch (_2) {
     }
-  }
-  function removeMask(sourceId) {
-    masks.delete(sourceId);
-  }
-  function clearAllMasks() {
-    masks.clear();
   }
   function swapAuthor(author) {
     if (!author?.id) return author;
@@ -15700,13 +15736,20 @@ ${pendingInsertLink}` : pendingInsertLink;
       avatar: target.avatar ?? null
     };
   }
+  function swapMessage(msg) {
+    var original = msg?.[ORIGINAL_AUTHOR] ?? msg?.author;
+    if (!original?.id) return;
+    if (masks.has(String(original.id))) {
+      msg[ORIGINAL_AUTHOR] = original;
+      msg.author = swapAuthor(original);
+    } else if (msg[ORIGINAL_AUTHOR]) {
+      msg.author = original;
+      Reflect.deleteProperty(msg, ORIGINAL_AUTHOR);
+    }
+  }
   function swapMessages(messages) {
     if (!Array.isArray(messages)) return;
-    for (var msg of messages) {
-      if (msg?.author && masks.has(String(msg.author.id))) {
-        msg.author = swapAuthor(msg.author);
-      }
-    }
+    for (var msg of messages) swapMessage(msg);
   }
   function patchUserStoreMask() {
     var unpatches8 = [];
@@ -15719,9 +15762,7 @@ ${pendingInsertLink}` : pendingInsertLink;
         swapMessages(e.messages);
         swapMessages(e.jumpTargetMessages);
       } else if (e.type === "MESSAGE_CREATE") {
-        if (e.message?.author && masks.has(String(e.message.author.id))) {
-          e.message.author = swapAuthor(e.message.author);
-        }
+        swapMessage(e.message);
       }
     };
     FluxDispatcher.addInterceptor(handler);
@@ -15730,7 +15771,7 @@ ${pendingInsertLink}` : pendingInsertLink;
       for (var fn of unpatches8) fn();
     };
   }
-  var masks;
+  var masks, ORIGINAL_AUTHOR;
   var init_userMask = __esm({
     "src/plugins/localmessagepreview/userMask.ts"() {
       "use strict";
@@ -15740,7 +15781,9 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_common();
       init_stores();
       init_metro();
+      init_storage21();
       masks = /* @__PURE__ */ new Map();
+      ORIGINAL_AUTHOR = "__lmpOriginalAuthor";
     }
   });
 
@@ -15815,6 +15858,36 @@ ${pendingInsertLink}` : pendingInsertLink;
       sourceUserId
     }));
   }
+  function ResetProfileAlert({ sourceUserId }) {
+    var targetId = sourceUserId ? getMaskTarget(sourceUserId) : void 0;
+    var reset = () => {
+      if (sourceUserId) removeMask(sourceUserId);
+      dismissAlert(RESET_ALERT_KEY);
+      showToast("Profile reset.");
+    };
+    return /* @__PURE__ */ jsx(AlertModal, {
+      title: targetId ? "Reset profile" : "Not swapped",
+      content: targetId ? `This profile is saved as ${targetId}. Put it back to normal?` : "This profile isn't swapped right now.",
+      actions: /* @__PURE__ */ jsxs(Stack, {
+        children: [
+          targetId ? /* @__PURE__ */ jsx(Button, {
+            text: "Reset to normal",
+            variant: "primary",
+            onPress: reset
+          }) : null,
+          /* @__PURE__ */ jsx(AlertActionButton, {
+            text: targetId ? "Cancel" : "Close",
+            variant: "secondary"
+          })
+        ]
+      })
+    });
+  }
+  function openResetBox(sourceUserId) {
+    openAlert(RESET_ALERT_KEY, /* @__PURE__ */ jsx(ResetProfileAlert, {
+      sourceUserId
+    }));
+  }
   function captureCopiedString(onPress) {
     var clipboard2 = findByProps("setString", "getString", "hasString");
     if (!clipboard2) return void 0;
@@ -15842,11 +15915,16 @@ ${pendingInsertLink}` : pendingInsertLink;
     }
     return void 0;
   }
-  function makeLongPressHandler(rowOnPress) {
+  function makeLongPressHandler(rowOnPress, open) {
     return () => {
       var userId = resolveUserId(rowOnPress);
-      setTimeout(() => openQuickMessageBox(userId), 50);
+      setTimeout(() => open(userId), 50);
     };
+  }
+  function handlerFor(label) {
+    if (SWAP_LABEL.test(label)) return openQuickMessageBox;
+    if (USER_ID_LABEL.test(label)) return openResetBox;
+    return void 0;
   }
   function labelOf2(node) {
     var props = node?.props;
@@ -15879,22 +15957,25 @@ ${pendingInsertLink}` : pendingInsertLink;
       unpatches8.push(before("showSimpleActionSheet", sheetModule, ([config]) => {
         var options = config?.options;
         if (!Array.isArray(options)) return;
-        var triggers = options.filter((o) => typeof o?.label === "string" && TRIGGER_LABEL.test(o.label));
-        if (triggers.length === 0) return;
-        pendingOptions = options;
-        for (var option of triggers) {
-          option.onLongPress = makeLongPressHandler(option.onPress);
+        var matched = false;
+        for (var option of options) {
+          var open = typeof option?.label === "string" ? handlerFor(option.label) : void 0;
+          if (!open) continue;
+          matched = true;
+          option.onLongPress = makeLongPressHandler(option.onPress, open);
           option.delayLongPress = LONG_PRESS_DELAY;
         }
+        if (matched) pendingOptions = options;
       }));
     }
     var rowModule = findByProps("ActionSheetRow");
     if (rowModule?.ActionSheetRow) {
       unpatches8.push(after("ActionSheetRow", rowModule, ([props], ret) => {
-        if (!TRIGGER_LABEL.test(labelOf2({
+        var open = handlerFor(labelOf2({
           props
-        }))) return;
-        attachLongPress(ret, makeLongPressHandler(props?.onPress));
+        }));
+        if (!open) return;
+        attachLongPress(ret, makeLongPressHandler(props?.onPress, open));
       }));
     }
     return () => {
@@ -15902,7 +15983,7 @@ ${pendingInsertLink}` : pendingInsertLink;
       pendingOptions = null;
     };
   }
-  var React17, ALERT_KEY, LONG_PRESS_DELAY, TRIGGER_LABEL, USER_ID_LABEL, SNOWFLAKE, AVATAR_URL_ID, pendingOptions;
+  var React17, ALERT_KEY, RESET_ALERT_KEY, LONG_PRESS_DELAY, SWAP_LABEL, USER_ID_LABEL, SNOWFLAKE, AVATAR_URL_ID, pendingOptions;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
@@ -15917,8 +15998,9 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_components();
       init_userMask();
       ALERT_KEY = "LocalMessagePreviewQuick";
+      RESET_ALERT_KEY = "LocalMessagePreviewReset";
       LONG_PRESS_DELAY = 2e3;
-      TRIGGER_LABEL = /avatar\s*image\s*link|user\s*name/i;
+      SWAP_LABEL = /avatar\s*image\s*link|user\s*name/i;
       USER_ID_LABEL = /user\s*id/i;
       SNOWFLAKE = /^\d{15,25}$/;
       AVATAR_URL_ID = /\/avatars\/(\d{15,25})\//;
@@ -15961,6 +16043,7 @@ ${pendingInsertLink}` : pendingInsertLink;
     if (!Array.isArray(st.rules)) st.rules = [];
     if (!Array.isArray(st.cached)) st.cached = [];
     if (typeof st.autoReplayOnLoad !== "boolean") st.autoReplayOnLoad = true;
+    if (!st.masks || typeof st.masks !== "object" || Array.isArray(st.masks)) st.masks = {};
     for (var rule of st.rules) ensurePreset(rule);
   }
   function commitPreset(st, index, next) {
@@ -16074,22 +16157,6 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_stores();
       init_storageModel();
       DISCORD_EPOCH_MS = 1420070400000n;
-    }
-  });
-
-  // src/plugins/localmessagepreview/storage.ts
-  var useRootStore, rootSettings;
-  var init_storage21 = __esm({
-    "src/plugins/localmessagepreview/storage.ts"() {
-      "use strict";
-      init_asyncIteratorSymbol();
-      init_promiseAllSettled();
-      init_storage();
-      ({ useStore: useRootStore, settings: rootSettings } = createPluginStore("localmessagepreview", {
-        rules: [],
-        cached: [],
-        autoReplayOnLoad: true
-      }));
     }
   });
 
@@ -16398,7 +16465,7 @@ ${pendingInsertLink}` : pendingInsertLink;
                 arrow: true
               }),
               /* @__PURE__ */ jsx(TableRow4, {
-                label: "Clear all profile swaps",
+                label: `Clear all profile swaps (${Object.keys(store.masks ?? {}).length})`,
                 subLabel: "Removes every locally swapped profile",
                 onPress: () => {
                   clearAllMasks();
@@ -16465,6 +16532,7 @@ ${pendingInsertLink}` : pendingInsertLink;
         version: "3.0.0",
         settings: LocalMessagePreviewSettings,
         start() {
+          loadMasks();
           unpatches6.push(patchQuickMessage());
           unpatches6.push(patchUserStoreMask());
           var st = rootSettings;
@@ -16482,7 +16550,7 @@ ${pendingInsertLink}` : pendingInsertLink;
         stop() {
           for (var fn of unpatches6) fn();
           unpatches6.length = 0;
-          clearAllMasks();
+          forgetMasks();
         }
       });
     }
