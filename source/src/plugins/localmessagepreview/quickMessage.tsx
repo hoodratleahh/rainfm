@@ -10,7 +10,8 @@ import { applyMask, removeMask } from "./userMask";
 const ALERT_KEY = "LocalMessagePreviewQuick";
 const LONG_PRESS_DELAY = 2000;
 
-const AVATAR_LINK_LABEL = /avatar\s*image\s*link/i;
+// "Copy Username" must not be read as "Copy User ID" — hence user\s*name.
+const TRIGGER_LABEL = /avatar\s*image\s*link|user\s*name/i;
 const USER_ID_LABEL = /user\s*id/i;
 const SNOWFLAKE = /^\d{15,25}$/;
 const AVATAR_URL_ID = /\/avatars\/(\d{15,25})\//;
@@ -154,21 +155,23 @@ export default function patchQuickMessage(): () => void {
             const options = config?.options;
             if (!Array.isArray(options)) return;
 
-            const avatarOption = options.find(
-                o => typeof o?.label === "string" && AVATAR_LINK_LABEL.test(o.label),
+            const triggers = options.filter(
+                o => typeof o?.label === "string" && TRIGGER_LABEL.test(o.label),
             );
-            if (!avatarOption) return;
+            if (triggers.length === 0) return;
 
             pendingOptions = options;
-            avatarOption.onLongPress = makeLongPressHandler(avatarOption.onPress);
-            avatarOption.delayLongPress = LONG_PRESS_DELAY;
+            for (const option of triggers) {
+                option.onLongPress = makeLongPressHandler(option.onPress);
+                option.delayLongPress = LONG_PRESS_DELAY;
+            }
         }));
     }
 
     const rowModule = findByProps("ActionSheetRow") as any;
     if (rowModule?.ActionSheetRow) {
         unpatches.push(after("ActionSheetRow", rowModule, ([props]: any[], ret: any) => {
-            if (!AVATAR_LINK_LABEL.test(labelOf({ props }))) return;
+            if (!TRIGGER_LABEL.test(labelOf({ props }))) return;
             attachLongPress(ret, makeLongPressHandler(props?.onPress));
         }));
     }

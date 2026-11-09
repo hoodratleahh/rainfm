@@ -15879,17 +15879,19 @@ ${pendingInsertLink}` : pendingInsertLink;
       unpatches8.push(before("showSimpleActionSheet", sheetModule, ([config]) => {
         var options = config?.options;
         if (!Array.isArray(options)) return;
-        var avatarOption = options.find((o) => typeof o?.label === "string" && AVATAR_LINK_LABEL.test(o.label));
-        if (!avatarOption) return;
+        var triggers = options.filter((o) => typeof o?.label === "string" && TRIGGER_LABEL.test(o.label));
+        if (triggers.length === 0) return;
         pendingOptions = options;
-        avatarOption.onLongPress = makeLongPressHandler(avatarOption.onPress);
-        avatarOption.delayLongPress = LONG_PRESS_DELAY;
+        for (var option of triggers) {
+          option.onLongPress = makeLongPressHandler(option.onPress);
+          option.delayLongPress = LONG_PRESS_DELAY;
+        }
       }));
     }
     var rowModule = findByProps("ActionSheetRow");
     if (rowModule?.ActionSheetRow) {
       unpatches8.push(after("ActionSheetRow", rowModule, ([props], ret) => {
-        if (!AVATAR_LINK_LABEL.test(labelOf2({
+        if (!TRIGGER_LABEL.test(labelOf2({
           props
         }))) return;
         attachLongPress(ret, makeLongPressHandler(props?.onPress));
@@ -15900,7 +15902,7 @@ ${pendingInsertLink}` : pendingInsertLink;
       pendingOptions = null;
     };
   }
-  var React17, ALERT_KEY, LONG_PRESS_DELAY, AVATAR_LINK_LABEL, USER_ID_LABEL, SNOWFLAKE, AVATAR_URL_ID, pendingOptions;
+  var React17, ALERT_KEY, LONG_PRESS_DELAY, TRIGGER_LABEL, USER_ID_LABEL, SNOWFLAKE, AVATAR_URL_ID, pendingOptions;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
@@ -15916,7 +15918,7 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_userMask();
       ALERT_KEY = "LocalMessagePreviewQuick";
       LONG_PRESS_DELAY = 2e3;
-      AVATAR_LINK_LABEL = /avatar\s*image\s*link/i;
+      TRIGGER_LABEL = /avatar\s*image\s*link|user\s*name/i;
       USER_ID_LABEL = /user\s*id/i;
       SNOWFLAKE = /^\d{15,25}$/;
       AVATAR_URL_ID = /\/avatars\/(\d{15,25})\//;
