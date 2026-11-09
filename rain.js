@@ -15618,6 +15618,28 @@ ${pendingInsertLink}` : pendingInsertLink;
     }
   });
 
+  // src/plugins/localmessagepreview/dispatch.ts
+  function dispatchLocalMessage(message) {
+    var channelId = String(message.channel_id ?? "");
+    if (!channelId) return;
+    FluxDispatcher.dispatch({
+      type: "MESSAGE_CREATE",
+      channelId,
+      guildId: message.guild_id ?? null,
+      message,
+      optimistic: false,
+      isPushNotification: false
+    });
+  }
+  var init_dispatch = __esm({
+    "src/plugins/localmessagepreview/dispatch.ts"() {
+      "use strict";
+      init_asyncIteratorSymbol();
+      init_promiseAllSettled();
+      init_common();
+    }
+  });
+
   // src/plugins/localmessagepreview/userMask.ts
   function applyMask(sourceId, targetId) {
     masks.set(sourceId, targetId);
@@ -15723,6 +15745,23 @@ ${pendingInsertLink}` : pendingInsertLink;
   });
 
   // src/plugins/localmessagepreview/quickMessage.tsx
+  function setPendingUser(id) {
+    pendingUserId = id;
+    if (pendingTimer !== null) clearTimeout(pendingTimer);
+    pendingTimer = setTimeout(() => {
+      pendingUserId = void 0;
+      pendingTimer = null;
+    }, 2e3);
+  }
+  function consumePending() {
+    var uid = pendingUserId;
+    pendingUserId = void 0;
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+    return uid;
+  }
   function QuickMessageAlert({ sourceUserId }) {
     var [targetId, setTargetId] = React17.useState("");
     var [error, setError] = React17.useState("");
@@ -15798,51 +15837,104 @@ ${pendingInsertLink}` : pendingInsertLink;
     return props?.user?.id ?? props?.userId ?? void 0;
   }
   function getLabel(item) {
-    return typeof item?.label === "string" ? item.label : typeof item?.text === "string" ? item.text : typeof item?.title === "string" ? item.title : "";
+    if (typeof item?.label === "string") return item.label;
+    if (typeof item?.text === "string") return item.text;
+    if (typeof item?.props?.label === "string") return item.props.label;
+    return "";
   }
   function collectItems(raw) {
     if (!Array.isArray(raw)) return [];
     if (raw.length > 0 && Array.isArray(raw[0])) return raw.flatMap((g2) => g2);
     return raw;
   }
-  function patchMenu(args, ret) {
-    var userId = extractUserId(args);
-    var node = findInReactTree(ret, (n) => Array.isArray(n?.props?.items) && n.props.items.length > 0);
-    if (!node) return;
-    var raw = node.props.items;
-    var items = collectItems(raw);
-    for (var item of items) {
-      if (!item || item.__lmpWrapped) continue;
-      if (!COPY_USERNAME.test(getLabel(item))) continue;
-      item.__lmpWrapped = true;
-      var handler = () => {
-        setTimeout(() => openQuickMessageBox(userId), 300);
-      };
-      if (typeof item.onPress === "function") item.onPress = handler;
-      if (typeof item.action === "function") item.action = handler;
-      if (typeof item.onPress !== "function" && typeof item.action !== "function") {
-        item.onPress = handler;
-        item.action = handler;
+  function hookItem(item, handler) {
+    item.__lmpWrapped = true;
+    if (typeof item.onPress === "function") item.onPress = handler;
+    if (typeof item.action === "function") item.action = handler;
+    if (typeof item.onPress !== "function" && typeof item.action !== "function") {
+      item.onPress = handler;
+      item.action = handler;
+    }
+  }
+  function tryHookSheet(tree, userId) {
+    var handler = () => {
+      setTimeout(() => openQuickMessageBox(userId), 300);
+    };
+    var nodeA = findInReactTree(tree, (n) => Array.isArray(n?.props?.items) && n.props.items.length > 0);
+    if (nodeA) {
+      var items = collectItems(nodeA.props.items);
+      for (var item of items) {
+        if (!item || item.__lmpWrapped) continue;
+        if (COPY_AVATAR_LINK.test(getLabel(item))) {
+          hookItem(item, handler);
+          return;
+        }
       }
-      break;
+      for (var item1 of items) {
+        if (!item1 || item1.__lmpWrapped) continue;
+        if (COPY_USERNAME.test(getLabel(item1))) {
+          hookItem(item1, handler);
+          return;
+        }
+      }
+    }
+    var avatarEl = findInReactTree(tree, (n) => n?.props && typeof n.props.label === "string" && COPY_AVATAR_LINK.test(n.props.label));
+    if (avatarEl?.props) {
+      avatarEl.props.onPress = handler;
+      return;
+    }
+    var usernameEl = findInReactTree(tree, (n) => n?.props && typeof n.props.label === "string" && COPY_USERNAME.test(n.props.label));
+    if (usernameEl?.props) {
+      usernameEl.props.onPress = handler;
     }
   }
   function patchQuickMessage() {
     var _loop2 = function(name2) {
       var mod = findByName(name2, false);
       if (mod) {
-        unpatches8.push(after("default", mod, patchMenu));
+        unpatches8.push(after("default", mod, (args, _ret) => {
+          var uid = extractUserId(args);
+          if (uid) setPendingUser(uid);
+        }));
       } else {
-        unpatches8.push(waitFor((exports) => exports?.name === name2 || exports?.default?.name === name2 ? exports : void 0, (exports) => unpatches8.push(after("default", exports, patchMenu))));
+        unpatches8.push(waitFor((exports) => exports?.name === name2 || exports?.default?.name === name2 ? exports : void 0, (exports) => unpatches8.push(after("default", exports, (args, _ret) => {
+          var uid = extractUserId(args);
+          if (uid) setPendingUser(uid);
+        }))));
       }
     };
     var unpatches8 = [];
     for (var name of MENU_NAMES) _loop2(name);
+    var LazyActionSheet8 = findByProps("openLazy", "hideActionSheet");
+    if (LazyActionSheet8) {
+      unpatches8.push(before("openLazy", LazyActionSheet8, (args) => {
+        if (!pendingUserId) return;
+        var uid = pendingUserId;
+        var origGetter = args[0];
+        if (typeof origGetter !== "function") return;
+        args[0] = () => {
+          var result = origGetter();
+          if (result && typeof result.then === "function") {
+            return result.then((m2) => {
+              if (!m2?.default) return m2;
+              consumePending();
+              var unpatch6 = after("default", m2, (_a, ret) => {
+                unpatch6();
+                tryHookSheet(ret, uid);
+              });
+              return m2;
+            });
+          }
+          consumePending();
+          return result;
+        };
+      }));
+    }
     return () => {
       for (var fn of unpatches8) fn();
     };
   }
-  var React17, MENU_NAMES, COPY_USERNAME, ALERT_KEY;
+  var React17, MENU_NAMES, COPY_AVATAR_LINK, COPY_USERNAME, ALERT_KEY, pendingUserId, pendingTimer;
   var init_quickMessage = __esm({
     "src/plugins/localmessagepreview/quickMessage.tsx"() {
       "use strict";
@@ -15862,30 +15954,10 @@ ${pendingInsertLink}` : pendingInsertLink;
         "UserProfileOverflowMenu",
         "BotUserProfileOverflowMenu"
       ];
+      COPY_AVATAR_LINK = /copy\s*avatar\s*(image\s*)?link/i;
       COPY_USERNAME = /copy\s*user\s*name/i;
       ALERT_KEY = "LocalMessagePreviewQuick";
-    }
-  });
-
-  // src/plugins/localmessagepreview/dispatch.ts
-  function dispatchLocalMessage(message) {
-    var channelId = String(message.channel_id ?? "");
-    if (!channelId) return;
-    FluxDispatcher.dispatch({
-      type: "MESSAGE_CREATE",
-      channelId,
-      guildId: message.guild_id ?? null,
-      message,
-      optimistic: false,
-      isPushNotification: false
-    });
-  }
-  var init_dispatch = __esm({
-    "src/plugins/localmessagepreview/dispatch.ts"() {
-      "use strict";
-      init_asyncIteratorSymbol();
-      init_promiseAllSettled();
-      init_common();
+      pendingTimer = null;
     }
   });
 
@@ -16359,6 +16431,15 @@ ${pendingInsertLink}` : pendingInsertLink;
                   showToast("Cache cleared.");
                 },
                 arrow: true
+              }),
+              /* @__PURE__ */ jsx(TableRow4, {
+                label: "Clear all profile swaps",
+                subLabel: "Removes every locally swapped profile",
+                onPress: () => {
+                  clearAllMasks();
+                  showToast("All profile swaps cleared.");
+                },
+                arrow: true
               })
             ]
           })
@@ -16383,6 +16464,7 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_dispatch();
       init_storageModel();
       init_storage21();
+      init_userMask();
       ({ TableRow: TableRow4 } = findByProps("TableRow"));
     }
   });
@@ -16399,8 +16481,10 @@ ${pendingInsertLink}` : pendingInsertLink;
       init_asyncIteratorSymbol();
       init_promiseAllSettled();
       init_plugins3();
+      init_dispatch();
       init_quickMessage();
       init_settings19();
+      init_storage21();
       init_userMask();
       unpatches6 = [];
       localmessagepreview_default = definePlugin({
@@ -16418,6 +16502,17 @@ ${pendingInsertLink}` : pendingInsertLink;
         start() {
           unpatches6.push(patchQuickMessage());
           unpatches6.push(patchUserStoreMask());
+          var st = rootSettings;
+          if (st.autoReplayOnLoad && Array.isArray(st.cached) && st.cached.length > 0) {
+            setTimeout(() => {
+              for (var msg of st.cached) {
+                try {
+                  dispatchLocalMessage(msg);
+                } catch (_2) {
+                }
+              }
+            }, 1500);
+          }
         },
         stop() {
           for (var fn of unpatches6) fn();
