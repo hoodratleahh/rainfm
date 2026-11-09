@@ -15691,6 +15691,16 @@ ${pendingInsertLink}` : pendingInsertLink;
   function getMaskTarget(sourceId) {
     return masks.get(sourceId);
   }
+  function findMaskSources(userId) {
+    if (masks.has(userId)) return [
+      userId
+    ];
+    var sources2 = [];
+    for (var [source, target] of masks) {
+      if (target === userId) sources2.push(source);
+    }
+    return sources2;
+  }
   function refreshCurrentChannel() {
     try {
       var channelId = SelectedChannelStore.getChannelId?.();
@@ -15788,6 +15798,12 @@ ${pendingInsertLink}` : pendingInsertLink;
   });
 
   // src/plugins/localmessagepreview/quickMessage.tsx
+  function originalsOf(userId) {
+    var sources2 = findMaskSources(userId);
+    return sources2.length > 0 ? sources2 : [
+      userId
+    ];
+  }
   function QuickMessageAlert({ sourceUserId }) {
     var [targetId, setTargetId] = React17.useState("");
     var [error, setError] = React17.useState("");
@@ -15803,7 +15819,10 @@ ${pendingInsertLink}` : pendingInsertLink;
         return;
       }
       try {
-        applyMask(sid, tid);
+        for (var source of originalsOf(sid)) {
+          if (source === tid) removeMask(source);
+          else applyMask(source, tid);
+        }
         dismissAlert(ALERT_KEY);
         showToast("Profile swapped locally.");
       } catch (e) {
@@ -15812,7 +15831,7 @@ ${pendingInsertLink}` : pendingInsertLink;
     };
     var reset = () => {
       var sid = sourceUserId?.trim();
-      if (sid) removeMask(sid);
+      if (sid) for (var source of originalsOf(sid)) removeMask(source);
       dismissAlert(ALERT_KEY);
       showToast("Profile reset.");
     };
@@ -15859,24 +15878,28 @@ ${pendingInsertLink}` : pendingInsertLink;
     }));
   }
   function ResetProfileAlert({ sourceUserId }) {
-    var targetId = sourceUserId ? getMaskTarget(sourceUserId) : void 0;
+    var sources2 = sourceUserId ? findMaskSources(sourceUserId) : [];
+    var swapped = sources2.length > 0;
     var reset = () => {
-      if (sourceUserId) removeMask(sourceUserId);
+      for (var source of sources2) removeMask(source);
       dismissAlert(RESET_ALERT_KEY);
       showToast("Profile reset.");
     };
     return /* @__PURE__ */ jsx(AlertModal, {
-      title: targetId ? "Reset profile" : "Not swapped",
-      content: targetId ? `This profile is saved as ${targetId}. Put it back to normal?` : "This profile isn't swapped right now.",
+      title: swapped ? "Reset profile" : "Not swapped",
+      content: swapped ? `Saved swap:
+${sources2.map((s) => `${s} \u2192 ${getMaskTarget(s)}`).join("\n")}
+
+Put it back to normal?` : "This profile isn't swapped right now.",
       actions: /* @__PURE__ */ jsxs(Stack, {
         children: [
-          targetId ? /* @__PURE__ */ jsx(Button, {
+          swapped ? /* @__PURE__ */ jsx(Button, {
             text: "Reset to normal",
             variant: "primary",
             onPress: reset
           }) : null,
           /* @__PURE__ */ jsx(AlertActionButton, {
-            text: targetId ? "Cancel" : "Close",
+            text: swapped ? "Cancel" : "Close",
             variant: "secondary"
           })
         ]

@@ -52,6 +52,17 @@ export function getMaskTarget(sourceId: string): string | undefined {
     return masks.get(sourceId);
 }
 
+// A swapped profile reports the target's ID everywhere in the UI, so an ID read
+// off the screen may be either side of a swap.
+export function findMaskSources(userId: string): string[] {
+    if (masks.has(userId)) return [userId];
+    const sources: string[] = [];
+    for (const [source, target] of masks) {
+        if (target === userId) sources.push(source);
+    }
+    return sources;
+}
+
 export function getMaskCount(): number {
     return masks.size;
 }

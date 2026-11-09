@@ -5,7 +5,7 @@ import { showToast } from "@api/ui/toasts";
 import { findByProps } from "@metro";
 import { AlertActionButton, AlertModal, Button, Stack, TextInput } from "@metro/common/components";
 
-import { applyMask, getMaskTarget, removeMask } from "./userMask";
+import { applyMask, findMaskSources, getMaskTarget, removeMask } from "./userMask";
 
 const ALERT_KEY = "LocalMessagePreviewQuick";
 const RESET_ALERT_KEY = "LocalMessagePreviewReset";
@@ -19,6 +19,13 @@ const AVATAR_URL_ID = /\/avatars\/(\d{15,25})\//;
 
 // ── Alert UI ──────────────────────────────────────────────────────────────────
 
+// An already-swapped profile shows up under its target's ID; map it back to the
+// user(s) it really belongs to so a re-swap or reset lands on the right person.
+function originalsOf(userId: string): string[] {
+    const sources = findMaskSources(userId);
+    return sources.length > 0 ? sources : [userId];
+}
+
 function QuickMessageAlert({ sourceUserId }: { sourceUserId?: string }) {
     const [targetId, setTargetId] = React.useState("");
     const [error, setError] = React.useState("");
@@ -29,7 +36,10 @@ function QuickMessageAlert({ sourceUserId }: { sourceUserId?: string }) {
         if (!tid) { setError("Type a user ID."); return; }
         if (!sid) { setError("Could not detect whose profile this is."); return; }
         try {
-            applyMask(sid, tid);
+            for (const source of originalsOf(sid)) {
+                if (source === tid) removeMask(source);
+                else applyMask(source, tid);
+            }
             dismissAlert(ALERT_KEY);
             showToast("Profile swapped locally.");
         } catch (e) {
@@ -39,7 +49,7 @@ function QuickMessageAlert({ sourceUserId }: { sourceUserId?: string }) {
 
     const reset = () => {
         const sid = sourceUserId?.trim();
-        if (sid) removeMask(sid);
+        if (sid) for (const source of originalsOf(sid)) removeMask(source);
         dismissAlert(ALERT_KEY);
         showToast("Profile reset.");
     };
@@ -75,23 +85,24 @@ function openQuickMessageBox(sourceUserId?: string) {
 }
 
 function ResetProfileAlert({ sourceUserId }: { sourceUserId?: string }) {
-    const targetId = sourceUserId ? getMaskTarget(sourceUserId) : undefined;
+    const sources = sourceUserId ? findMaskSources(sourceUserId) : [];
+    const swapped = sources.length > 0;
 
     const reset = () => {
-        if (sourceUserId) removeMask(sourceUserId);
+        for (const source of sources) removeMask(source);
         dismissAlert(RESET_ALERT_KEY);
         showToast("Profile reset.");
     };
 
     return <AlertModal
-        title={targetId ? "Reset profile" : "Not swapped"}
-        content={targetId
-            ? `This profile is saved as ${targetId}. Put it back to normal?`
+        title={swapped ? "Reset profile" : "Not swapped"}
+        content={swapped
+            ? `Saved swap:\n${sources.map(s => `${s} → ${getMaskTarget(s)}`).join("\n")}\n\nPut it back to normal?`
             : "This profile isn't swapped right now."}
         actions={
             <Stack>
-                {targetId ? <Button text="Reset to normal" variant="primary" onPress={reset} /> : null}
-                <AlertActionButton text={targetId ? "Cancel" : "Close"} variant="secondary" />
+                {swapped ? <Button text="Reset to normal" variant="primary" onPress={reset} /> : null}
+                <AlertActionButton text={swapped ? "Cancel" : "Close"} variant="secondary" />
             </Stack>
         }
     />;
