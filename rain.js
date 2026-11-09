@@ -15658,6 +15658,17 @@ ${pendingInsertLink}` : pendingInsertLink;
   });
 
   // src/plugins/localmessagepreview/userMask.ts
+  function getMessageStore() {
+    return messageStore ??= findByProps("getMessages", "getMessage");
+  }
+  function getRealUser(id) {
+    bypassMask = true;
+    try {
+      return UserStore.getUser?.(id);
+    } finally {
+      bypassMask = false;
+    }
+  }
   function persist2() {
     var out = {};
     for (var [source, target] of masks) out[source] = target;
@@ -15671,11 +15682,6 @@ ${pendingInsertLink}` : pendingInsertLink;
     }
     if (masks.size > 0) refreshCurrentChannel();
   }
-  function getAllMasks() {
-    return [
-      ...masks
-    ];
-  }
   function applyMask(sourceId, targetId) {
     masks.set(sourceId, targetId);
     persist2();
@@ -15685,17 +15691,26 @@ ${pendingInsertLink}` : pendingInsertLink;
     masks.delete(sourceId);
     persist2();
     refreshCurrentChannel();
+    void healCurrentChannelFromServer();
   }
   function clearAllMasks() {
     masks.clear();
     persist2();
     refreshCurrentChannel();
+    void healCurrentChannelFromServer();
   }
   function forgetMasks() {
     masks.clear();
+    refreshCurrentChannel();
+    realAuthors.clear();
   }
   function getMaskTarget(sourceId) {
     return masks.get(sourceId);
+  }
+  function getAllMasks() {
+    return [
+      ...masks
+    ];
   }
   function findMaskSources(userId) {
     if (masks.has(userId)) return [
@@ -15707,78 +15722,148 @@ ${pendingInsertLink}` : pendingInsertLink;
     }
     return sources2;
   }
-  function refreshCurrentChannel() {
-    try {
-      var channelId = SelectedChannelStore.getChannelId?.();
-      if (!channelId) return;
-      var MessageStore2 = findByProps("getMessages", "getMessage");
-      if (!MessageStore2) return;
-      var collection = MessageStore2.getMessages(channelId);
-      if (!collection) return;
-      var rawMsgs = collection._array ?? collection.toArray?.() ?? [];
-      var msgs = rawMsgs.slice().reverse();
-      swapMessages(msgs);
-      FluxDispatcher.dispatch({
-        type: "LOAD_MESSAGES_SUCCESS",
-        channelId,
-        messages: msgs,
-        isBefore: false,
-        isAfter: false,
-        hasMoreBefore: true,
-        hasMoreAfter: false,
-        limit: msgs.length
-      });
-    } catch (_2) {
-    }
+  function isRecord(author) {
+    return Object.getPrototypeOf(author) !== Object.prototype;
+  }
+  function asStoreAuthor(real) {
+    var known = getRealUser(String(real.id));
+    if (known) return known;
+    return isRecord(real) ? real : {
+      ...real,
+      globalName: real.globalName ?? real.global_name ?? null
+    };
   }
   function swapAuthor(author) {
-    if (!author?.id) return author;
     var targetId = masks.get(String(author.id));
     if (!targetId) return author;
-    var target = UserStore.getUser?.(targetId);
-    if (!target) return {
-      ...author,
-      id: targetId,
-      username: "Unknown",
-      global_name: null,
-      avatar: null
-    };
+    var target = getRealUser(targetId);
+    if (!target) {
+      return {
+        ...author,
+        id: targetId,
+        username: "Unknown",
+        global_name: null,
+        globalName: null,
+        avatar: null
+      };
+    }
+    if (isRecord(author)) return target;
     var displayName = target.globalName ?? target.global_name ?? null;
     return {
       ...author,
       id: target.id,
       username: target.username,
+      discriminator: target.discriminator ?? author.discriminator,
       global_name: displayName,
+      globalName: displayName,
       avatar: target.avatar ?? null
     };
   }
-  function swapMessage(msg) {
-    var original = msg?.[ORIGINAL_AUTHOR] ?? msg?.author;
-    if (!original?.id) return;
-    if (masks.has(String(original.id))) {
-      msg[ORIGINAL_AUTHOR] = original;
-      msg.author = swapAuthor(original);
-    } else if (msg[ORIGINAL_AUTHOR]) {
-      msg.author = original;
-      Reflect.deleteProperty(msg, ORIGINAL_AUTHOR);
+  function syncStoredMessage(msg) {
+    if (!msg?.id || !msg.author?.id) return;
+    var key = String(msg.id);
+    var real = realAuthors.get(key) ?? msg.author;
+    if (masks.has(String(real.id))) {
+      realAuthors.set(key, real);
+      msg.author = swapAuthor(asStoreAuthor(real));
+    } else if (realAuthors.has(key)) {
+      msg.author = asStoreAuthor(real);
+      realAuthors.delete(key);
     }
   }
-  function swapMessages(messages) {
-    if (!Array.isArray(messages)) return;
-    for (var msg of messages) swapMessage(msg);
+  function applyServerMessage(channelId, raw) {
+    if (!raw?.id || !raw.author?.id) return;
+    var key = String(raw.id);
+    var real = raw.author;
+    var masked = masks.has(String(real.id));
+    if (masked) realAuthors.set(key, real);
+    else realAuthors.delete(key);
+    var stored = channelId ? getMessageStore()?.getMessage?.(channelId, raw.id) : void 0;
+    if (stored && stored !== raw && stored.author) {
+      if (masked) stored.author = swapAuthor(asStoreAuthor(real));
+      else if (String(stored.author.id) !== String(real.id)) stored.author = asStoreAuthor(real);
+    }
+    if (masked) raw.author = swapAuthor(real);
+  }
+  function storedMessages(channelId) {
+    var collection = getMessageStore()?.getMessages?.(channelId);
+    return collection?._array ?? collection?.toArray?.() ?? [];
+  }
+  function refreshChannel(channelId) {
+    var msgs = storedMessages(channelId).slice().reverse();
+    for (var msg of msgs) syncStoredMessage(msg);
+    FluxDispatcher.dispatch({
+      type: "LOAD_MESSAGES_SUCCESS",
+      channelId,
+      messages: msgs,
+      isBefore: false,
+      isAfter: false,
+      hasMoreBefore: true,
+      hasMoreAfter: false,
+      limit: msgs.length,
+      [REFRESH_FLAG]: true
+    });
+  }
+  function refreshCurrentChannel() {
+    try {
+      var channelId = SelectedChannelStore.getChannelId?.();
+      if (channelId) refreshChannel(channelId);
+    } catch (_2) {
+    }
+  }
+  function isOlder(id, than) {
+    var a = String(id), b3 = String(than);
+    if (!/^\d+$/.test(a) || !/^\d+$/.test(b3)) return false;
+    return BigInt(a) < BigInt(b3);
+  }
+  function healCurrentChannelFromServer() {
+    return _async_to_generator(function* () {
+      try {
+        var channelId = SelectedChannelStore.getChannelId?.();
+        var api = findByProps("getAPIBaseURL", "del");
+        if (!channelId || typeof api?.get !== "function") return;
+        var stored = storedMessages(channelId);
+        var before3;
+        for (var page = 0; page < MAX_HEAL_PAGES; page++) {
+          var query = {
+            limit: PAGE_SIZE
+          };
+          if (before3) query.before = before3;
+          var res = yield api.get({
+            url: `/channels/${channelId}/messages`,
+            query
+          });
+          var body = res?.body;
+          if (!Array.isArray(body) || body.length === 0) break;
+          for (var raw of body) applyServerMessage(channelId, raw);
+          before3 = String(body[body.length - 1].id);
+          if (body.length < PAGE_SIZE) break;
+          if (!stored.some((msg) => isOlder(msg?.id, before3))) break;
+        }
+        refreshChannel(channelId);
+      } catch (_2) {
+      }
+    })();
   }
   function patchUserStoreMask() {
     var unpatches8 = [];
     unpatches8.push(before("getUser", UserStore, (args) => {
+      if (bypassMask) return;
       var id = String(args[0] ?? "");
       if (id && masks.has(id)) args[0] = masks.get(id);
     }));
     var handler = (e) => {
       if (e.type === "LOAD_MESSAGES_SUCCESS") {
-        swapMessages(e.messages);
-        swapMessages(e.jumpTargetMessages);
+        if (e[REFRESH_FLAG]) return;
+        for (var list of [
+          e.messages,
+          e.jumpTargetMessages
+        ]) {
+          if (!Array.isArray(list)) continue;
+          for (var raw of list) applyServerMessage(e.channelId, raw);
+        }
       } else if (e.type === "MESSAGE_CREATE") {
-        swapMessage(e.message);
+        applyServerMessage(void 0, e.message);
       }
     };
     FluxDispatcher.addInterceptor(handler);
@@ -15787,19 +15872,24 @@ ${pendingInsertLink}` : pendingInsertLink;
       for (var fn of unpatches8) fn();
     };
   }
-  var masks, ORIGINAL_AUTHOR;
+  var masks, realAuthors, REFRESH_FLAG, PAGE_SIZE, MAX_HEAL_PAGES, bypassMask, messageStore;
   var init_userMask = __esm({
     "src/plugins/localmessagepreview/userMask.ts"() {
       "use strict";
       init_asyncIteratorSymbol();
       init_promiseAllSettled();
+      init_async_to_generator();
       init_patcher();
       init_common();
       init_stores();
       init_metro();
       init_storage21();
       masks = /* @__PURE__ */ new Map();
-      ORIGINAL_AUTHOR = "__lmpOriginalAuthor";
+      realAuthors = /* @__PURE__ */ new Map();
+      REFRESH_FLAG = "__lmpRefresh";
+      PAGE_SIZE = 50;
+      MAX_HEAL_PAGES = 5;
+      bypassMask = false;
     }
   });
 
@@ -16575,7 +16665,7 @@ ${detected}`;
           }
         ],
         id: "localmessagepreview",
-        version: "3.1.0",
+        version: "3.2.0",
         settings: LocalMessagePreviewSettings,
         start() {
           running = true;
