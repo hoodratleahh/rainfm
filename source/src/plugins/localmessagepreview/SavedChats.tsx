@@ -10,7 +10,7 @@ import { ScrollView } from "react-native";
 import { pickChat } from "./ChatPicker";
 import {
     addSavedChat, currentChannelId, deleteSavedChat, injectMessages, parseDataCode,
-    readChat, toDataCode, updateSavedChat,
+    readChat, retimeMessages, toDataCode, updateSavedChat,
 } from "./chats";
 import { useRootStore } from "./storage";
 import type { PortableMessage, SavedChat } from "./types";
@@ -32,6 +32,18 @@ function span(messages: PortableMessage[]): string {
     return first === last ? first : `${first} → ${last}`;
 }
 
+function fmtLocal(iso?: string): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function parseLocal(text: string): number {
+    return Date.parse(text.trim().replace(" ", "T"));
+}
+
 function describe(message: PortableMessage): string {
     if (message.content) return message.content;
     if (message.attachments.length > 0) return "[attachment]";
@@ -45,7 +57,26 @@ function SavedChatPage({ chatId }: { chatId: string }) {
     const store = useRootStore();
     const navigation = NavigationNative.useNavigation();
     const chat: SavedChat | undefined = ((store as any).savedChats ?? []).find((c: SavedChat) => c.id === chatId);
+    const [startText, setStartText] = React.useState(() => fmtLocal(chat?.messages[0]?.timestamp));
     if (!chat) return null;
+
+    const applyStart = () => {
+        if (chat.messages.length === 0) { showToast("Nothing to retime."); return; }
+        const ms = parseLocal(startText);
+        if (!Number.isFinite(ms)) { showToast("Use YYYY-MM-DD HH:MM, like 2026-11-07 21:30."); return; }
+        updateSavedChat(chat.id, { messages: retimeMessages(chat.messages, ms) });
+        showToast("Chat retimed — everything shifted, gaps kept.");
+    };
+
+    const endNow = () => {
+        if (chat.messages.length === 0) { showToast("Nothing to retime."); return; }
+        const first = Date.parse(chat.messages[0].timestamp);
+        const last = Date.parse(chat.messages[chat.messages.length - 1].timestamp);
+        const ms = Date.now() - (last - first);
+        updateSavedChat(chat.id, { messages: retimeMessages(chat.messages, ms) });
+        setStartText(fmtLocal(new Date(ms).toISOString()));
+        showToast("Chat retimed — the last message just happened.");
+    };
 
     const send = () => pickChat(navigation, "Send into…", (channelId, name) => {
         try {
@@ -104,6 +135,29 @@ function SavedChatPage({ chatId }: { chatId: string }) {
                         label="Copy data code"
                         subLabel="The whole chat as JSON, in Discord's message format"
                         onPress={copy}
+                        arrow
+                    />
+                </TableRowGroup>
+
+                <TableRowGroup title="Timestamps">
+                    <Card>
+                        <SettingsTextInput
+                            placeholder="New start — YYYY-MM-DD HH:MM"
+                            value={startText}
+                            onChange={setStartText}
+                            isClearable
+                        />
+                    </Card>
+                    <TableRow
+                        label="Apply new start time"
+                        subLabel="The whole chat shifts to begin then; the gaps between messages stay the same"
+                        onPress={applyStart}
+                        arrow
+                    />
+                    <TableRow
+                        label="End just now"
+                        subLabel="Shifts the chat so the last message was a moment ago"
+                        onPress={endNow}
                         arrow
                     />
                 </TableRowGroup>

@@ -237,6 +237,19 @@ export function parseDataCode(text: string): { name: string; messages: PortableM
     return { name, messages };
 }
 
+/** Shifts every message so the first lands on newStartMs; the gaps between them stay as they were. */
+export function retimeMessages(messages: PortableMessage[], newStartMs: number): PortableMessage[] {
+    if (messages.length === 0) return messages;
+    const delta = newStartMs - Date.parse(messages[0].timestamp);
+    if (!delta || !Number.isFinite(delta)) return messages;
+    const shift = (iso: string | null) => (iso ? new Date(Date.parse(iso) + delta).toISOString() : iso);
+    return messages.map(m => ({
+        ...m,
+        timestamp: shift(m.timestamp) as string,
+        edited_timestamp: shift(m.edited_timestamp),
+    }));
+}
+
 // ── Saved chats ───────────────────────────────────────────────────────────────
 
 export function addSavedChat(name: string, messages: PortableMessage[]): SavedChat {

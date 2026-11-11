@@ -16126,6 +16126,17 @@ ${pendingInsertLink}` : pendingInsertLink;
       messages
     };
   }
+  function retimeMessages(messages, newStartMs) {
+    if (messages.length === 0) return messages;
+    var delta = newStartMs - Date.parse(messages[0].timestamp);
+    if (!delta || !Number.isFinite(delta)) return messages;
+    var shift = (iso) => iso ? new Date(Date.parse(iso) + delta).toISOString() : iso;
+    return messages.map((m2) => ({
+      ...m2,
+      timestamp: shift(m2.timestamp),
+      edited_timestamp: shift(m2.edited_timestamp)
+    }));
+  }
   function addSavedChat(name, messages) {
     var chat = {
       id: snowflakeAt(Date.now()),
@@ -17297,6 +17308,16 @@ ${detected}`;
     var last = when(messages[messages.length - 1].timestamp);
     return first === last ? first : `${first} \u2192 ${last}`;
   }
+  function fmtLocal(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    var p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function parseLocal(text) {
+    return Date.parse(text.trim().replace(" ", "T"));
+  }
   function describe(message) {
     if (message.content) return message.content;
     if (message.attachments.length > 0) return "[attachment]";
@@ -17307,7 +17328,37 @@ ${detected}`;
     var store = useRootStore();
     var navigation2 = NavigationNative.useNavigation();
     var chat = (store.savedChats ?? []).find((c2) => c2.id === chatId);
+    var [startText, setStartText] = import_react20.default.useState(() => fmtLocal(chat?.messages[0]?.timestamp));
     if (!chat) return null;
+    var applyStart = () => {
+      if (chat.messages.length === 0) {
+        showToast("Nothing to retime.");
+        return;
+      }
+      var ms = parseLocal(startText);
+      if (!Number.isFinite(ms)) {
+        showToast("Use YYYY-MM-DD HH:MM, like 2026-11-07 21:30.");
+        return;
+      }
+      updateSavedChat(chat.id, {
+        messages: retimeMessages(chat.messages, ms)
+      });
+      showToast("Chat retimed \u2014 everything shifted, gaps kept.");
+    };
+    var endNow = () => {
+      if (chat.messages.length === 0) {
+        showToast("Nothing to retime.");
+        return;
+      }
+      var first = Date.parse(chat.messages[0].timestamp);
+      var last = Date.parse(chat.messages[chat.messages.length - 1].timestamp);
+      var ms = Date.now() - (last - first);
+      updateSavedChat(chat.id, {
+        messages: retimeMessages(chat.messages, ms)
+      });
+      setStartText(fmtLocal(new Date(ms).toISOString()));
+      showToast("Chat retimed \u2014 the last message just happened.");
+    };
     var send = () => pickChat(navigation2, "Send into\u2026", (channelId, name) => {
       try {
         var count = injectMessages(channelId, chat.messages);
@@ -17376,6 +17427,31 @@ ${detected}`;
                 label: "Copy data code",
                 subLabel: "The whole chat as JSON, in Discord's message format",
                 onPress: copy,
+                arrow: true
+              })
+            ]
+          }),
+          /* @__PURE__ */ jsxs(TableRowGroup, {
+            title: "Timestamps",
+            children: [
+              /* @__PURE__ */ jsx(Card7, {
+                children: /* @__PURE__ */ jsx(SettingsTextInput, {
+                  placeholder: "New start \u2014 YYYY-MM-DD HH:MM",
+                  value: startText,
+                  onChange: setStartText,
+                  isClearable: true
+                })
+              }),
+              /* @__PURE__ */ jsx(TableRow5, {
+                label: "Apply new start time",
+                subLabel: "The whole chat shifts to begin then; the gaps between messages stay the same",
+                onPress: applyStart,
+                arrow: true
+              }),
+              /* @__PURE__ */ jsx(TableRow5, {
+                label: "End just now",
+                subLabel: "Shifts the chat so the last message was a moment ago",
+                onPress: endNow,
                 arrow: true
               })
             ]
@@ -17845,7 +17921,7 @@ ${when(message.timestamp)}`
           }
         ],
         id: "localmessagepreview",
-        version: "3.4.0",
+        version: "3.5.0",
         settings: LocalMessagePreviewSettings,
         start() {
           running = true;
