@@ -12,14 +12,14 @@ const masks = new Map<string, string>(); // sourceId → targetId
 // so the truth has to live outside the messages.
 const realAuthors = new Map<string, any>();
 
-const REFRESH_FLAG = "__lmpRefresh";
+export const REFRESH_FLAG = "__lmpRefresh";
 const PAGE_SIZE = 50;
 const MAX_HEAL_PAGES = 5;
 
 let bypassMask = false;
 let messageStore: any;
 
-function getMessageStore(): any {
+export function getMessageStore(): any {
     return messageStore ??= findByProps("getMessages", "getMessage");
 }
 
@@ -162,15 +162,50 @@ function applyServerMessage(channelId: string | undefined, raw: any): void {
     if (masked) raw.author = swapAuthor(real);
 }
 
-function storedMessages(channelId: string): any[] {
+export function storedMessages(channelId: string): any[] {
     const collection = getMessageStore()?.getMessages?.(channelId);
     return collection?._array ?? collection?.toArray?.() ?? [];
 }
 
 function refreshChannel(channelId: string): void {
-    // _array is newest-first; LOAD_MESSAGES_SUCCESS wants oldest-first.
+    // LOAD_MESSAGES_SUCCESS takes the store's order reversed.
     const msgs = storedMessages(channelId).slice().reverse();
     for (const msg of msgs) syncStoredMessage(msg);
+    dispatchRefresh(channelId, msgs);
+}
+
+function idValue(id: unknown): bigint {
+    const text = String(id ?? "");
+    return /^\d+$/.test(text) ? BigInt(text) : 0n;
+}
+
+/**
+ * Puts the open channel's messages back in time order. Local messages arrive
+ * through MESSAGE_CREATE, which always appends, so one with an old timestamp
+ * lands at the bottom until this runs.
+ */
+export function resortChannel(channelId: string): void {
+    const stored = storedMessages(channelId);
+    if (stored.length < 2) return;
+
+    // Which way the store runs is read off the store itself, not assumed.
+    const ids = stored.map(msg => idValue(msg?.id));
+    let rising = 0, falling = 0;
+    for (let i = 1; i < ids.length; i++) {
+        if (ids[i] > ids[i - 1]) rising++;
+        else if (ids[i] < ids[i - 1]) falling++;
+    }
+    if (rising === 0 || falling === 0) return; // already in order
+
+    const direction = rising >= falling ? 1 : -1;
+    const sorted = stored.slice().sort((a, b) => {
+        const x = idValue(a?.id), y = idValue(b?.id);
+        return x === y ? 0 : (x < y ? -direction : direction);
+    });
+    dispatchRefresh(channelId, sorted.reverse());
+}
+
+function dispatchRefresh(channelId: string, msgs: any[]): void {
     // hasMoreBefore: true keeps the scroll anchored at the bottom (most recent messages)
     (FluxDispatcher as any).dispatch({
         type: "LOAD_MESSAGES_SUCCESS",

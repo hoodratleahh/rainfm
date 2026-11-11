@@ -5,8 +5,11 @@ import { Stack, TableRowGroup, TableSwitchRow } from "@metro/common/components";
 import { findByProps } from "@metro";
 import { ScrollView } from "react-native";
 
+import { removeLocalMessages } from "./chats";
 import EditPreset from "./EditPreset";
 import { dispatchLocalMessage } from "./dispatch";
+import SavedChatsPage from "./SavedChats";
+import SendMessagePage from "./SendMessage";
 import { defaultPreset, ensureRoot } from "./storageModel";
 import { useRootStore } from "./storage";
 import { clearAllMasks } from "./userMask";
@@ -44,6 +47,27 @@ export default function LocalMessagePreviewSettings() {
     return (
         <ScrollView style={{ flex: 1 }}>
             <Stack style={{ paddingVertical: 12, paddingHorizontal: 12 }} spacing={16}>
+                <TableRowGroup title="Local messages">
+                    <TableRow
+                        label="Send a local message"
+                        subLabel="Any chat, any user ID, any time"
+                        onPress={() => navigation.push("RAIN_CUSTOM_PAGE", {
+                            title: "Send a local message",
+                            render: () => React.createElement(SendMessagePage),
+                        })}
+                        arrow
+                    />
+                    <TableRow
+                        label={`Saved chats (${((store as any).savedChats ?? []).length})`}
+                        subLabel="Save a chat, send it into another, copy or import its data code"
+                        onPress={() => navigation.push("RAIN_CUSTOM_PAGE", {
+                            title: "Saved chats",
+                            render: () => React.createElement(SavedChatsPage),
+                        })}
+                        arrow
+                    />
+                </TableRowGroup>
+
                 <TableRowGroup title="Presets">
                     {store.rules.length === 0 && (
                         <TableRow label="No presets yet — add one below" />
@@ -71,8 +95,8 @@ export default function LocalMessagePreviewSettings() {
 
                 <TableRowGroup title="Cache & replay">
                     <TableSwitchRow
-                        label="Auto-replay on load"
-                        subLabel="Re-inject cached messages each time Discord opens"
+                        label="Keep local messages"
+                        subLabel="Put them back whenever a chat loads or Discord restarts"
                         value={(store as any).autoReplayOnLoad ?? true}
                         onValueChange={(v: boolean) => { (store as any).autoReplayOnLoad = v; }}
                     />
@@ -82,8 +106,9 @@ export default function LocalMessagePreviewSettings() {
                         arrow
                     />
                     <TableRow
-                        label="Clear cache"
-                        onPress={() => { (store as any).cached = []; showToast("Cache cleared."); }}
+                        label={`Remove all local messages (${(store as any).cached?.length ?? 0})`}
+                        subLabel="Takes them out of every chat. Saved chats are kept"
+                        onPress={() => showToast(`Removed ${removeLocalMessages()} local message(s).`)}
                         arrow
                     />
                     <TableRow

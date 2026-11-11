@@ -9,4 +9,5 @@ export const {
     cached: [],
     autoReplayOnLoad: true,
     masks: {},
+    savedChats: [],
 });

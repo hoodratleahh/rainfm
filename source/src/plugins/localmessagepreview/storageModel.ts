@@ -28,6 +28,7 @@ export function ensureRoot(st: RootStorage): void {
     if (!Array.isArray(st.cached)) st.cached = [];
     if (typeof st.autoReplayOnLoad !== "boolean") st.autoReplayOnLoad = true;
     if (!st.masks || typeof st.masks !== "object" || Array.isArray(st.masks)) st.masks = {};
+    if (!Array.isArray(st.savedChats)) st.savedChats = [];
     for (const rule of st.rules) ensurePreset(rule);
 }
 

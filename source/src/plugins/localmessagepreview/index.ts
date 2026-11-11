@@ -1,10 +1,10 @@
 import { waitForHydration } from "@api/storage";
 import { definePlugin } from "@plugins";
 
-import { dispatchLocalMessage } from "./dispatch";
+import { currentChannelId, patchLocalReplay, replayMissing } from "./chats";
 import patchQuickMessage from "./quickMessage";
 import settings from "./settings";
-import { rootSettings, useRootStore } from "./storage";
+import { useRootStore } from "./storage";
 import { forgetMasks, loadMasks, patchUserStoreMask } from "./userMask";
 
 const unpatches: (() => void)[] = [];
@@ -15,11 +15,13 @@ export default definePlugin({
     description: "Locally swap profiles in chat. Never sent to Discord.",
     author: [{ name: "you", id: 0n }],
     id: "localmessagepreview",
-    version: "3.3.0",
+    version: "3.4.0",
     settings,
     start() {
         running = true;
         unpatches.push(patchQuickMessage());
+        // Before the swap patch: merged local messages must pass through it too.
+        unpatches.push(patchLocalReplay());
         unpatches.push(patchUserStoreMask());
 
         // Storage is read from disk asynchronously; anything saved is still
@@ -28,15 +30,12 @@ export default definePlugin({
             if (!running) return;
             loadMasks();
 
-            const st = rootSettings as any;
-            if (st.autoReplayOnLoad && Array.isArray(st.cached) && st.cached.length > 0) {
-                setTimeout(() => {
-                    if (!running) return;
-                    for (const msg of st.cached as Record<string, unknown>[]) {
-                        try { dispatchLocalMessage(msg); } catch (_) {}
-                    }
-                }, 1500);
-            }
+            // Chats that load from now on get their local messages merged in as
+            // they load; this covers the one that was already open by then.
+            setTimeout(() => {
+                if (!running) return;
+                try { replayMissing(currentChannelId()); } catch (_) {}
+            }, 1500);
         });
     },
     stop() {
