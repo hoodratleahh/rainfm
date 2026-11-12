@@ -16137,6 +16137,37 @@ ${pendingInsertLink}` : pendingInsertLink;
       edited_timestamp: shift(m2.edited_timestamp)
     }));
   }
+  function listAuthors(messages) {
+    var seen = /* @__PURE__ */ new Map();
+    for (var m2 of messages) {
+      var entry = seen.get(m2.author.id);
+      if (entry) entry.count += 1;
+      else seen.set(m2.author.id, {
+        author: m2.author,
+        count: 1
+      });
+    }
+    return [
+      ...seen.values()
+    ];
+  }
+  function replaceAuthor(messages, fromId, author) {
+    return messages.map((m2) => m2.author.id === fromId ? {
+      ...m2,
+      author: {
+        ...author
+      }
+    } : m2);
+  }
+  function resolveKnownAuthor(userId) {
+    return _async_to_generator(function* () {
+      var author = yield resolveAuthor(userId);
+      if (author.username === "Unknown" && !author.global_name && !author.avatar) {
+        throw new Error(`No user found for ID ${author.id} \u2014 check the ID and your connection.`);
+      }
+      return author;
+    })();
+  }
   function addSavedChat(name, messages) {
     var chat = {
       id: snowflakeAt(Date.now()),
@@ -17329,6 +17360,7 @@ ${detected}`;
     var navigation2 = NavigationNative.useNavigation();
     var chat = (store.savedChats ?? []).find((c2) => c2.id === chatId);
     var [startText, setStartText] = import_react20.default.useState(() => fmtLocal(chat?.messages[0]?.timestamp));
+    var [swapTo, setSwapTo] = import_react20.default.useState({});
     if (!chat) return null;
     var applyStart = () => {
       if (chat.messages.length === 0) {
@@ -17359,6 +17391,29 @@ ${detected}`;
       setStartText(fmtLocal(new Date(ms).toISOString()));
       showToast("Chat retimed \u2014 the last message just happened.");
     };
+    var applySwaps = () => _async_to_generator(function* () {
+      var picks = Object.entries(swapTo).map(([from2, to2]) => [
+        from2,
+        to2.trim()
+      ]).filter(([, to2]) => to2);
+      if (picks.length === 0) {
+        showToast("Paste a user ID under an author first.");
+        return;
+      }
+      try {
+        var messages = chat.messages;
+        for (var [from, to] of picks) {
+          messages = replaceAuthor(messages, from, yield resolveKnownAuthor(to));
+        }
+        updateSavedChat(chat.id, {
+          messages
+        });
+        setSwapTo({});
+        showToast(`Swapped ${picks.length} author(s).`);
+      } catch (e) {
+        showToast(e.message);
+      }
+    })();
     var send = () => pickChat(navigation2, "Send into\u2026", (channelId, name) => {
       try {
         var count = injectMessages(channelId, chat.messages);
@@ -17452,6 +17507,36 @@ ${detected}`;
                 label: "End just now",
                 subLabel: "Shifts the chat so the last message was a moment ago",
                 onPress: endNow,
+                arrow: true
+              })
+            ]
+          }),
+          /* @__PURE__ */ jsxs(TableRowGroup, {
+            title: "Authors",
+            children: [
+              listAuthors(chat.messages).map(({ author, count }) => /* @__PURE__ */ jsxs(import_react20.default.Fragment, {
+                children: [
+                  /* @__PURE__ */ jsx(TableRow5, {
+                    label: author.global_name || author.username,
+                    subLabel: `${count} message(s) \xB7 ID ${author.id}`
+                  }),
+                  /* @__PURE__ */ jsx(Card7, {
+                    children: /* @__PURE__ */ jsx(SettingsTextInput, {
+                      placeholder: "Show as user ID\u2026 (blank = keep)",
+                      value: swapTo[author.id] ?? "",
+                      onChange: (v2) => setSwapTo((prev) => ({
+                        ...prev,
+                        [author.id]: v2
+                      })),
+                      isClearable: true
+                    })
+                  })
+                ]
+              }, author.id)),
+              /* @__PURE__ */ jsx(TableRow5, {
+                label: "Apply replacements",
+                subLabel: "Each filled-in author shows as that user everywhere in this chat",
+                onPress: applySwaps,
                 arrow: true
               })
             ]
@@ -17921,7 +18006,7 @@ ${when(message.timestamp)}`
           }
         ],
         id: "localmessagepreview",
-        version: "3.5.0",
+        version: "3.6.0",
         settings: LocalMessagePreviewSettings,
         start() {
           running = true;

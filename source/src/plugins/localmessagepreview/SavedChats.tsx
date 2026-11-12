@@ -9,8 +9,8 @@ import { ScrollView } from "react-native";
 
 import { pickChat } from "./ChatPicker";
 import {
-    addSavedChat, currentChannelId, deleteSavedChat, injectMessages, parseDataCode,
-    readChat, retimeMessages, toDataCode, updateSavedChat,
+    addSavedChat, currentChannelId, deleteSavedChat, injectMessages, listAuthors, parseDataCode,
+    readChat, replaceAuthor, resolveKnownAuthor, retimeMessages, toDataCode, updateSavedChat,
 } from "./chats";
 import { useRootStore } from "./storage";
 import type { PortableMessage, SavedChat } from "./types";
@@ -58,6 +58,7 @@ function SavedChatPage({ chatId }: { chatId: string }) {
     const navigation = NavigationNative.useNavigation();
     const chat: SavedChat | undefined = ((store as any).savedChats ?? []).find((c: SavedChat) => c.id === chatId);
     const [startText, setStartText] = React.useState(() => fmtLocal(chat?.messages[0]?.timestamp));
+    const [swapTo, setSwapTo] = React.useState<Record<string, string>>({});
     if (!chat) return null;
 
     const applyStart = () => {
@@ -76,6 +77,24 @@ function SavedChatPage({ chatId }: { chatId: string }) {
         updateSavedChat(chat.id, { messages: retimeMessages(chat.messages, ms) });
         setStartText(fmtLocal(new Date(ms).toISOString()));
         showToast("Chat retimed — the last message just happened.");
+    };
+
+    const applySwaps = async () => {
+        const picks = Object.entries(swapTo)
+            .map(([from, to]) => [from, to.trim()] as const)
+            .filter(([, to]) => to);
+        if (picks.length === 0) { showToast("Paste a user ID under an author first."); return; }
+        try {
+            let messages = chat.messages;
+            for (const [from, to] of picks) {
+                messages = replaceAuthor(messages, from, await resolveKnownAuthor(to));
+            }
+            updateSavedChat(chat.id, { messages });
+            setSwapTo({});
+            showToast(`Swapped ${picks.length} author(s).`);
+        } catch (e) {
+            showToast((e as Error).message);
+        }
     };
 
     const send = () => pickChat(navigation, "Send into…", (channelId, name) => {
@@ -158,6 +177,31 @@ function SavedChatPage({ chatId }: { chatId: string }) {
                         label="End just now"
                         subLabel="Shifts the chat so the last message was a moment ago"
                         onPress={endNow}
+                        arrow
+                    />
+                </TableRowGroup>
+
+                <TableRowGroup title="Authors">
+                    {listAuthors(chat.messages).map(({ author, count }) => (
+                        <React.Fragment key={author.id}>
+                            <TableRow
+                                label={author.global_name || author.username}
+                                subLabel={`${count} message(s) · ID ${author.id}`}
+                            />
+                            <Card>
+                                <SettingsTextInput
+                                    placeholder="Show as user ID… (blank = keep)"
+                                    value={swapTo[author.id] ?? ""}
+                                    onChange={(v: string) => setSwapTo(prev => ({ ...prev, [author.id]: v }))}
+                                    isClearable
+                                />
+                            </Card>
+                        </React.Fragment>
+                    ))}
+                    <TableRow
+                        label="Apply replacements"
+                        subLabel="Each filled-in author shows as that user everywhere in this chat"
+                        onPress={applySwaps}
                         arrow
                     />
                 </TableRowGroup>

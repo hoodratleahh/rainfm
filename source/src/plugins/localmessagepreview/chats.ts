@@ -250,6 +250,31 @@ export function retimeMessages(messages: PortableMessage[], newStartMs: number):
     }));
 }
 
+/** The chat's authors in order of first appearance, with how many messages each sent. */
+export function listAuthors(messages: PortableMessage[]): { author: PortableAuthor; count: number }[] {
+    const seen = new Map<string, { author: PortableAuthor; count: number }>();
+    for (const m of messages) {
+        const entry = seen.get(m.author.id);
+        if (entry) entry.count += 1;
+        else seen.set(m.author.id, { author: m.author, count: 1 });
+    }
+    return [...seen.values()];
+}
+
+/** Every message `fromId` sent, shown as `author` instead. */
+export function replaceAuthor(messages: PortableMessage[], fromId: string, author: PortableAuthor): PortableMessage[] {
+    return messages.map(m => (m.author.id === fromId ? { ...m, author: { ...author } } : m));
+}
+
+/** resolveAuthor, but a user that can't be found is an error, not a placeholder. */
+export async function resolveKnownAuthor(userId: string): Promise<PortableAuthor> {
+    const author = await resolveAuthor(userId);
+    if (author.username === "Unknown" && !author.global_name && !author.avatar) {
+        throw new Error(`No user found for ID ${author.id} — check the ID and your connection.`);
+    }
+    return author;
+}
+
 // ── Saved chats ───────────────────────────────────────────────────────────────
 
 export function addSavedChat(name: string, messages: PortableMessage[]): SavedChat {

@@ -15,7 +15,7 @@ export default definePlugin({
     description: "Locally swap profiles in chat. Never sent to Discord.",
     author: [{ name: "you", id: 0n }],
     id: "localmessagepreview",
-    version: "3.5.0",
+    version: "3.6.0",
     settings,
     start() {
         running = true;
